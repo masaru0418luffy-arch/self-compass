@@ -260,10 +260,11 @@
     layers:'<svg viewBox="0 0 24 24"><path d="M12 4 20 8.5 12 13 4 8.5z"/><path d="M4 13 12 17.5 20 13"/><path d="M4 17 12 21.5 20 17"/></svg>',
     pencil:'<svg viewBox="0 0 24 24"><path d="M4 20 4.9 16.4 15.4 5.9c.6-.6 1.5-.6 2.1 0l1.6 1.6c.6.6.6 1.5 0 2.1L8.6 20.1 4 20z"/><path d="M13.8 7.5 16.5 10.2"/></svg>',
     check:'<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M8.3 12.3 10.8 14.8 15.9 9.4"/></svg>',
+    target:'<svg viewBox="0 0 24 24"><path d="M6 3v18"/><path d="M6 4h12l-3 4 3 4H6"/></svg>',
     chat:'<svg viewBox="0 0 24 24"><path d="M4 5.5h16v10H9.5L5.5 19v-3.5H4z"/></svg>'
   };
 
-  var DEFAULT_STATE = { meta:{ updatedAt:null }, intake:{}, journal:[], insights:[], actions:[] };
+  var DEFAULT_STATE = { meta:{ updatedAt:null }, intake:{}, journal:[], insights:[], actions:[], goals:[] };
   var state = JSON.parse(JSON.stringify(DEFAULT_STATE));
   var tab = sessionStorage.getItem("sc_tab") || "home";
   var authMode = "login";
@@ -306,7 +307,7 @@
       if(snap.exists){
         var data = snap.data();
         state = Object.assign({}, DEFAULT_STATE, data, {
-          intake: data.intake || {}, journal: data.journal || [], insights: data.insights || [], actions: data.actions || []
+          intake: data.intake || {}, journal: data.journal || [], insights: data.insights || [], actions: data.actions || [], goals: data.goals || []
         });
       } else {
         docRef().set(state);
@@ -316,14 +317,20 @@
   }
 
   /* ---------- render helpers ---------- */
-  function sparkline(entries){
+  function sparkline(entries, unitLabel){
+    unitLabel = unitLabel || "気分";
     if(!entries.length) return '<p style="font-size:.82rem">まだ記録がありません。</p>';
     var w=300,h=64,pad=4,n=entries.length,bw=(w-pad*2)/n;
     var bars = entries.map(function(e,i){
       var bh = Math.max(3,(e.mood/10)*(h-pad*2)); var x=pad+i*bw; var y=h-pad-bh;
-      return '<rect x="'+x.toFixed(1)+'" y="'+y.toFixed(1)+'" width="'+Math.max(2,bw-2).toFixed(1)+'" height="'+bh.toFixed(1)+'" rx="2" fill="var(--accent)" opacity="'+(0.45+0.55*(i/n)).toFixed(2)+'"><title>'+esc(e.date)+" 気分"+e.mood+'</title></rect>';
+      return '<rect x="'+x.toFixed(1)+'" y="'+y.toFixed(1)+'" width="'+Math.max(2,bw-2).toFixed(1)+'" height="'+bh.toFixed(1)+'" rx="2" fill="var(--accent)" opacity="'+(0.45+0.55*(i/n)).toFixed(2)+'"><title>'+esc(e.date)+" "+unitLabel+e.mood+'</title></rect>';
     }).join("");
     return '<div class="chart-wrap"><svg viewBox="0 0 '+w+' '+h+'" width="100%" height="'+h+'" preserveAspectRatio="none"><line x1="'+pad+'" y1="'+(h-pad)+'" x2="'+(w-pad)+'" y2="'+(h-pad)+'" stroke="var(--border)" stroke-width="1"/>'+bars+'</svg></div>';
+  }
+  function goalLatestScore(g){
+    if(!g.checkins || !g.checkins.length) return null;
+    var sorted = g.checkins.slice().sort(function(a,b){ return a.date < b.date ? 1 : -1; });
+    return sorted[0].score;
   }
   function chipRow(name, options, selected){
     return options.map(function(o){ var on = selected.indexOf(o) > -1; return '<button type="button" class="chip" data-chip="'+name+'" data-val="'+esc(o)+'" aria-pressed="'+on+'">'+esc(o)+'</button>'; }).join("");
@@ -336,6 +343,8 @@
     var last30mood = avg(recentJournal(30).map(function(j){return j.mood;}));
     var lastInsight = state.insights.slice().sort(function(a,b){ return a.date < b.date ? 1 : -1; })[0];
     var openActions = state.actions.filter(function(a){ return a.status !== "done"; }).length;
+    var goalScores = (state.goals||[]).filter(function(g){ return g.status !== "done"; }).map(goalLatestScore).filter(function(s){ return s!==null; });
+    var goalAvg = avg(goalScores);
     var welcome = "";
     if(intakeAnswered()===0 && state.journal.length===0){
       welcome = '<div class="card"><h3>はじめまして。</h3>' +
@@ -348,6 +357,7 @@
         '<div class="card stat"><div class="num">'+st+'<span style="font-size:.9rem">日</span></div><div class="lbl">連続記録日数</div></div>' +
         '<div class="card stat"><div class="num">'+(last30mood!==null ? last30mood.toFixed(1) : "—")+'</div><div class="lbl">直近30日の平均気分（10点満点）</div></div>' +
         '<div class="card stat"><div class="num">'+openActions+'</div><div class="lbl">進行中のアクション</div></div>' +
+        ((state.goals && state.goals.length) ? '<div class="card stat"><div class="num">'+(goalAvg!==null ? goalAvg.toFixed(1) : "—")+'</div><div class="lbl">目標への平均達成度（'+state.goals.length+'件中・10点満点）</div></div>' : "") +
       '</div>' +
       '<div class="card"><h3>気分の推移（直近14日）</h3>' + sparkline(recent) + '</div>' +
       (lastInsight ? '<div class="card"><h3>最近の気づき</h3><p class="quote-mark">"</p><p style="color:var(--ink)">'+esc(lastInsight.text)+'</p><p style="font-size:.75rem;color:var(--ink-faint);margin-top:.4em">'+fmtDate(lastInsight.date)+(lastInsight.tag?" ・ "+esc(lastInsight.tag):"")+'</p></div>' : "") +
@@ -421,6 +431,44 @@
       }).join("") : '<div class="empty">まだアクションがありません。</div>') + '</div>';
   }
 
+  function renderGoalCard(g){
+    var latest = goalLatestScore(g);
+    var entries = (g.checkins||[]).slice().sort(function(a,b){ return a.date < b.date ? -1 : 1; }).map(function(c){ return { date:c.date, mood:c.score }; });
+    return '<div class="card" data-goal="'+g.id+'"><div class="col">' +
+      '<div class="entry-head"><span class="a-title" style="font-weight:600;font-size:.98rem">'+esc(g.title)+'</span>' +
+        '<span class="entry-scores">'+(g.status==="done" ? "達成済み" : (latest!==null ? latest+"/10" : "未記録"))+'</span></div>' +
+      (g.definition ? '<p style="font-size:.85rem;color:var(--ink-soft);margin:0">'+esc(g.definition)+'</p>' : "") +
+      (g.targetDate ? '<p style="font-size:.75rem;color:var(--ink-faint);margin:0">期限: '+fmtDate(g.targetDate)+'</p>' : "") +
+      sparkline(entries, "達成度") +
+      (g.status!=="done" ?
+        '<div class="row" style="align-items:flex-end">' +
+          '<div style="flex:1;min-width:8rem"><label class="field-label">今の達成度（1〜10）: <span data-goal-score-val="'+g.id+'">'+(latest||5)+'</span></label>' +
+            '<input type="range" min="1" max="10" value="'+(latest||5)+'" data-goal-score="'+g.id+'"></div>' +
+          '<button class="btn btn-ghost btn-small" data-goal-checkin="'+g.id+'">記録する</button>' +
+        '</div>' : "") +
+      '<div class="row">' +
+        '<button class="btn btn-ghost btn-small" data-goal-status="'+g.id+'" data-next="'+(g.status==="done"?"active":"done")+'">'+(g.status==="done"?"再開する":"達成にする")+'</button>' +
+        '<button class="icon-btn" data-goal-del="'+g.id+'" aria-label="削除">✕</button>' +
+      '</div>' +
+    '</div></div>';
+  }
+
+  function renderGoals(){
+    var sorted = state.goals.slice().sort(function(a,b){
+      if(a.status !== b.status) return a.status==="done" ? 1 : -1;
+      return (a.createdAt < b.createdAt) ? 1 : -1;
+    });
+    return '<h2 class="section-title">目標</h2>' +
+      '<p class="section-lead">目指す姿を具体的な目標に分解し、定期的に「どれだけ近づいたか」を記録します。迷いの中でも、進んでいる実感を数字で残せます。</p>' +
+      '<div class="card"><h3>新しい目標</h3><div class="col">' +
+        '<div><label class="field-label">目標</label><input class="input" id="g-title" placeholder="例：最初の有料顧客を獲得する"></div>' +
+        '<div><label class="field-label">成功の定義（達成したと言えるのはどんな状態か）</label><textarea id="g-def" placeholder="例：月額契約のお客様が1人以上いる状態"></textarea></div>' +
+        '<div><label class="field-label">目標期限（任意）</label><input class="input" type="date" id="g-date"></div>' +
+        '<button class="btn btn-primary" id="g-submit">目標を追加</button>' +
+      '</div></div>' +
+      (sorted.length ? sorted.map(renderGoalCard).join("") : '<div class="empty">まだ目標が登録されていません。</div>');
+  }
+
   function buildSummary(){
     var lines = [];
     lines.push("あなたは資格を持つ一流のキャリア・メンタルカウンセラーです。以下はマサルさんについて、これまでに蓄積されたプロフィールと最近の記録です。");
@@ -449,6 +497,16 @@
     lines.push("");
     lines.push("【現在のアクション】");
     if(state.actions.length){ var labelMap={todo:"未着手",doing:"進行中",done:"完了"}; state.actions.forEach(function(a){ lines.push("- ["+labelMap[a.status]+"] "+a.title); }); } else lines.push("（登録なし）");
+    lines.push("");
+    lines.push("【目標と進捗】");
+    if(state.goals && state.goals.length){
+      state.goals.forEach(function(g){
+        var latest = goalLatestScore(g);
+        lines.push("・"+g.title+(g.status==="done"?"（達成済み）":"")+(g.targetDate?"　期限:"+g.targetDate:""));
+        if(g.definition) lines.push("  成功の定義: "+g.definition);
+        lines.push("  最新の達成度: "+(latest!==null ? latest+"/10" : "未記録")+(g.checkins&&g.checkins.length>1 ? "（記録"+g.checkins.length+"回・推移あり）" : ""));
+      });
+    } else lines.push("（登録なし）");
     return lines.join("\n");
   }
 
@@ -467,6 +525,7 @@
     {id:"intake", label:"自己分析", icon:"layers", render:renderIntake},
     {id:"record", label:"記録", icon:"pencil", render:renderRecord},
     {id:"actions", label:"アクション", icon:"check", render:renderActions},
+    {id:"goals", label:"目標", icon:"target", render:renderGoals},
     {id:"consult", label:"相談", icon:"chat", render:renderConsult}
   ];
 
@@ -562,6 +621,48 @@
     });
     app.querySelectorAll("[data-action-del]").forEach(function(btn){
       btn.addEventListener("click", function(){ var id=btn.getAttribute("data-action-del"); persist(function(next){ next.actions = next.actions.filter(function(a){ return a.id!==id; }); }); });
+    });
+    var gSubmit = app.querySelector("#g-submit");
+    if(gSubmit) gSubmit.addEventListener("click", function(){
+      var title = app.querySelector("#g-title").value.trim(); if(!title) return;
+      var def = app.querySelector("#g-def").value.trim();
+      var date = app.querySelector("#g-date").value;
+      persist(function(next){ next.goals = next.goals || []; next.goals.unshift({ id:uid(), title:title, definition:def, targetDate:date, createdAt:todayStr(), status:"active", checkins:[] }); });
+    });
+    app.querySelectorAll("[data-goal-score]").forEach(function(rng){
+      rng.addEventListener("input", function(){
+        var id = rng.getAttribute("data-goal-score");
+        var out = app.querySelector('[data-goal-score-val="'+id+'"]');
+        if(out) out.textContent = rng.value;
+      });
+    });
+    app.querySelectorAll("[data-goal-checkin]").forEach(function(btn){
+      btn.addEventListener("click", function(){
+        var id = btn.getAttribute("data-goal-checkin");
+        var rng = app.querySelector('[data-goal-score="'+id+'"]');
+        var score = parseInt(rng.value,10);
+        var date = todayStr();
+        persist(function(next){
+          next.goals.forEach(function(g){
+            if(g.id===id){
+              g.checkins = (g.checkins||[]).filter(function(c){ return c.date !== date; });
+              g.checkins.push({ date:date, score:score });
+            }
+          });
+        });
+      });
+    });
+    app.querySelectorAll("[data-goal-status]").forEach(function(btn){
+      btn.addEventListener("click", function(){
+        var id = btn.getAttribute("data-goal-status"); var nextStatus = btn.getAttribute("data-next");
+        persist(function(next){ next.goals.forEach(function(g){ if(g.id===id) g.status = nextStatus; }); });
+      });
+    });
+    app.querySelectorAll("[data-goal-del]").forEach(function(btn){
+      btn.addEventListener("click", function(){
+        var id = btn.getAttribute("data-goal-del");
+        persist(function(next){ next.goals = next.goals.filter(function(g){ return g.id!==id; }); });
+      });
     });
     var cBuild = app.querySelector("#c-build");
     if(cBuild) cBuild.addEventListener("click", function(){
