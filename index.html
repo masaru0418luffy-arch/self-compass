@@ -1,0 +1,600 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>セルフコンパス</title>
+<meta name="theme-color" content="#3B5344" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#191B15" media="(prefers-color-scheme: dark)">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="セルフコンパス">
+<meta name="application-name" content="セルフコンパス">
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 24 24%27%3E%3Ccircle cx=%2712%27 cy=%2712%27 r=%2710%27 fill=%27%233B5344%27/%3E%3Cpath d=%27M12 6l3 6-3 6-3-6z%27 fill=%27%23F2EFE6%27/%3E%3C/svg%3E">
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Shippori+Mincho:wght@400;500;600;700;800&family=Zen+Kaku+Gothic+New:wght@300;400;500;700;900&display=swap');
+
+  :root{
+    --bg:#F2EFE6;
+    --surface:#FFFFFF;
+    --surface-2:#EAE5D6;
+    --ink:#242A21;
+    --ink-soft:#5B5D4C;
+    --ink-faint:#8B8C78;
+    --accent:#3B5344;
+    --accent-strong:#28392E;
+    --accent-soft:#DCE3D1;
+    --accent-ink:#F4F7EF;
+    --gold:#A9812F;
+    --gold-soft:#F1E3BE;
+    --clay:#A15746;
+    --clay-soft:#F1DAD1;
+    --border:#DBD5C1;
+    --shadow:0 1px 2px rgba(36,42,33,0.07), 0 6px 18px rgba(36,42,33,0.07);
+    --radius-s:8px;
+    --radius-m:14px;
+    --radius-l:24px;
+    --font-head:'Shippori Mincho', serif;
+    --font-body:'Zen Kaku Gothic New','Hiragino Kaku Gothic ProN','Noto Sans JP',sans-serif;
+  }
+  @media (prefers-color-scheme: dark){
+    :root:not([data-theme="light"]){
+      --bg:#191B15; --surface:#22241C; --surface-2:#2A2C21;
+      --ink:#ECE7D8; --ink-soft:#B7B7A0; --ink-faint:#83836C;
+      --accent:#8CB093; --accent-strong:#B0CDB4; --accent-soft:#333F30; --accent-ink:#152018;
+      --gold:#D9B463; --gold-soft:#3B331D; --clay:#D3907C; --clay-soft:#3A2822;
+      --border:#3A3C2F; --shadow:0 1px 2px rgba(0,0,0,0.25), 0 8px 20px rgba(0,0,0,0.3);
+    }
+  }
+  :root[data-theme="dark"]{
+    --bg:#191B15; --surface:#22241C; --surface-2:#2A2C21;
+    --ink:#ECE7D8; --ink-soft:#B7B7A0; --ink-faint:#83836C;
+    --accent:#8CB093; --accent-strong:#B0CDB4; --accent-soft:#333F30; --accent-ink:#152018;
+    --gold:#D9B463; --gold-soft:#3B331D; --clay:#D3907C; --clay-soft:#3A2822;
+    --border:#3A3C2F; --shadow:0 1px 2px rgba(0,0,0,0.25), 0 8px 20px rgba(0,0,0,0.3);
+  }
+
+  *,*::before,*::after{ box-sizing:border-box; }
+  html{ -webkit-text-size-adjust:100%; }
+  body{ margin:0; background:var(--bg); color:var(--ink); font-family:var(--font-body); line-height:1.7; -webkit-font-smoothing:antialiased; }
+  h1,h2,h3{ font-family:var(--font-head); font-weight:700; margin:0 0 .4em; text-wrap:balance; color:var(--ink); }
+  p{ margin:0 0 .8em; color:var(--ink-soft); }
+  ::selection{ background:var(--accent-soft); }
+  a{ color:var(--accent-strong); }
+  button{ font-family:inherit; }
+  textarea,input{ font-family:inherit; font-size:1rem; color:var(--ink); }
+  :focus-visible{ outline:2px solid var(--accent); outline-offset:2px; border-radius:4px; }
+
+  .shell{ max-width:720px; margin:0 auto; min-height:100dvh; display:flex; flex-direction:column; }
+  .topbar{ position:sticky; top:0; z-index:10; background:color-mix(in srgb, var(--bg) 88%, transparent); backdrop-filter:blur(8px); border-bottom:1px solid var(--border); padding:.9rem 1.1rem; display:flex; align-items:baseline; justify-content:space-between; gap:.6rem; }
+  .topbar .brand{ font-family:var(--font-head); font-size:1.05rem; font-weight:700; letter-spacing:.02em; }
+  .topbar .right{ display:flex; align-items:baseline; gap:.7rem; }
+  .topbar .streak{ font-size:.78rem; color:var(--ink-faint); font-variant-numeric:tabular-nums; white-space:nowrap; }
+  .topbar .logout{ font-size:.74rem; color:var(--ink-faint); background:none; border:none; cursor:pointer; text-decoration:underline; padding:0; }
+
+  main{ flex:1; padding:1.1rem 1.1rem 6.5rem; display:flex; flex-direction:column; gap:1rem; }
+  .section-title{ font-size:1.3rem; margin-bottom:.15em; }
+  .section-lead{ font-size:.92rem; margin-bottom:.2em; }
+
+  .card{ background:var(--surface); border:1px solid var(--border); border-radius:var(--radius-m); padding:1.1rem 1.2rem; box-shadow:var(--shadow); }
+  .card h3{ font-size:1.02rem; margin-bottom:.5em; }
+
+  .row{ display:flex; gap:.6rem; flex-wrap:wrap; align-items:center; }
+  .col{ display:flex; flex-direction:column; gap:.5rem; }
+  .grid-2{ display:grid; grid-template-columns:1fr 1fr; gap:.8rem; }
+  @media (max-width:420px){ .grid-2{ grid-template-columns:1fr; } }
+
+  .stat{ display:flex; flex-direction:column; gap:.15rem; }
+  .stat .num{ font-family:var(--font-head); font-size:1.6rem; font-variant-numeric:tabular-nums; color:var(--accent-strong); line-height:1; }
+  .stat .lbl{ font-size:.76rem; color:var(--ink-faint); }
+
+  .progress{ height:8px; border-radius:99px; background:var(--surface-2); overflow:hidden; }
+  .progress > div{ height:100%; background:var(--accent); border-radius:99px; transition:width .4s ease; }
+
+  .btn{ display:inline-flex; align-items:center; justify-content:center; gap:.4em; border-radius:999px; border:1px solid transparent; cursor:pointer; padding:.65em 1.2em; font-size:.92rem; font-weight:500; white-space:nowrap; transition:transform .15s ease, opacity .15s ease; }
+  .btn:active{ transform:scale(.97); }
+  .btn-primary{ background:var(--accent); color:var(--accent-ink); }
+  .btn-primary:hover{ background:var(--accent-strong); }
+  .btn-ghost{ background:transparent; color:var(--accent-strong); border-color:var(--border); }
+  .btn-ghost:hover{ background:var(--surface-2); }
+  .btn-small{ padding:.4em .9em; font-size:.8rem; }
+  .btn[disabled]{ opacity:.5; cursor:default; }
+  .btn-block{ width:100%; }
+
+  .chip{ border:1px solid var(--border); background:var(--surface-2); color:var(--ink-soft); border-radius:999px; padding:.35em .85em; font-size:.8rem; cursor:pointer; }
+  .chip[aria-pressed="true"]{ background:var(--accent-soft); border-color:var(--accent); color:var(--accent-strong); font-weight:500; }
+
+  textarea, .input{ width:100%; background:var(--bg); border:1px solid var(--border); border-radius:var(--radius-s); padding:.7em .8em; resize:vertical; min-height:4.2em; color:var(--ink); }
+  input[type="date"].input, input[type="email"].input, input[type="password"].input{ min-height:auto; }
+  label.field-label{ font-size:.82rem; color:var(--ink-faint); margin-bottom:.3em; display:block; }
+  input[type="range"]{ width:100%; accent-color:var(--accent); }
+
+  details.accordion{ border:1px solid var(--border); border-radius:var(--radius-m); background:var(--surface); overflow:hidden; box-shadow:var(--shadow); }
+  details.accordion + details.accordion{ margin-top:.7rem; }
+  details.accordion summary{ list-style:none; cursor:pointer; padding:.9rem 1.1rem; display:flex; align-items:center; justify-content:space-between; gap:.6rem; }
+  details.accordion summary::-webkit-details-marker{ display:none; }
+  details.accordion summary .s-title{ font-family:var(--font-head); font-weight:700; font-size:1rem; }
+  details.accordion summary .s-meta{ font-size:.74rem; color:var(--ink-faint); white-space:nowrap; font-variant-numeric:tabular-nums; }
+  details.accordion .s-body{ padding:1rem 1.1rem 1.1rem; display:flex; flex-direction:column; gap:1rem; border-top:1px solid var(--border); }
+  .q-block .q-label{ font-size:.88rem; color:var(--ink); margin-bottom:.4em; font-weight:500; }
+
+  .entry{ border-bottom:1px solid var(--border); padding:.85rem 0; }
+  .entry:last-child{ border-bottom:none; }
+  .entry .entry-head{ display:flex; align-items:center; justify-content:space-between; gap:.6rem; margin-bottom:.3rem; }
+  .entry .entry-date{ font-size:.78rem; color:var(--ink-faint); font-variant-numeric:tabular-nums; }
+  .entry .entry-scores{ font-size:.78rem; color:var(--accent-strong); font-variant-numeric:tabular-nums; }
+  .entry .entry-tags{ display:flex; gap:.35rem; flex-wrap:wrap; margin:.35rem 0; }
+  .entry .tag-pill{ font-size:.7rem; background:var(--accent-soft); color:var(--accent-strong); padding:.15em .6em; border-radius:999px; }
+  .entry .entry-note{ font-size:.88rem; color:var(--ink); white-space:pre-wrap; }
+  .entry .insight-tag{ font-size:.7rem; color:var(--gold); font-weight:700; }
+
+  .empty{ text-align:center; padding:2rem 1rem; color:var(--ink-faint); font-size:.88rem; }
+
+  .action-row{ display:flex; align-items:center; gap:.7rem; padding:.7rem 0; border-bottom:1px solid var(--border); }
+  .action-row:last-child{ border-bottom:none; }
+  .action-row .a-title{ flex:1; font-size:.92rem; }
+  .action-row.done .a-title{ text-decoration:line-through; color:var(--ink-faint); }
+  select.status-select{ background:var(--surface-2); border:1px solid var(--border); border-radius:999px; padding:.3em .7em; font-size:.76rem; color:var(--ink); }
+  .icon-btn{ background:none; border:none; color:var(--ink-faint); cursor:pointer; font-size:1rem; padding:.2em .4em; }
+  .icon-btn:hover{ color:var(--clay); }
+
+  nav.bottombar{ position:fixed; left:0; right:0; bottom:0; z-index:20; display:flex; justify-content:center; }
+  nav.bottombar .inner{ max-width:720px; width:100%; display:flex; background:color-mix(in srgb, var(--surface) 96%, transparent); backdrop-filter:blur(10px); border-top:1px solid var(--border); padding:.4rem .4rem calc(.4rem + env(safe-area-inset-bottom)); }
+  nav.bottombar button{ flex:1; background:none; border:none; cursor:pointer; padding:.45rem .2rem; display:flex; flex-direction:column; align-items:center; gap:.22rem; color:var(--ink-faint); font-size:.68rem; }
+  nav.bottombar button svg{ width:21px; height:21px; stroke:currentColor; fill:none; stroke-width:1.7; }
+  nav.bottombar button[aria-current="true"]{ color:var(--accent-strong); }
+  nav.bottombar button[aria-current="true"] svg{ stroke-width:2; }
+
+  .banner{ font-size:.8rem; padding:.7em 1em; border-radius:var(--radius-s); background:var(--clay-soft); color:var(--clay); border:1px solid var(--clay); }
+  .banner.ok{ background:var(--accent-soft); color:var(--accent-strong); border-color:var(--accent); }
+
+  .chart-wrap{ overflow-x:auto; }
+  .quote-mark{ font-family:var(--font-head); color:var(--gold); font-size:1.1rem; }
+  .summary-box{ white-space:pre-wrap; font-size:.82rem; max-height:15rem; overflow-y:auto; background:var(--bg); border:1px solid var(--border); border-radius:var(--radius-s); padding:.9rem; color:var(--ink-soft); }
+
+  .auth-wrap{ min-height:100dvh; display:flex; align-items:center; justify-content:center; padding:1.5rem; }
+  .auth-card{ max-width:360px; width:100%; }
+  .auth-card h1{ font-size:1.4rem; text-align:center; }
+  .auth-card .lead{ text-align:center; font-size:.86rem; margin-bottom:1.2rem; }
+  .auth-tabs{ display:flex; gap:.4rem; margin-bottom:1rem; }
+  .auth-tabs button{ flex:1; padding:.5em; border-radius:999px; border:1px solid var(--border); background:var(--surface-2); color:var(--ink-soft); cursor:pointer; font-size:.86rem; }
+  .auth-tabs button[aria-selected="true"]{ background:var(--accent); color:var(--accent-ink); border-color:var(--accent); }
+  .loading-wrap{ min-height:100dvh; display:flex; align-items:center; justify-content:center; color:var(--ink-faint); font-size:.86rem; }
+
+  @media (prefers-reduced-motion: reduce){ *{ transition:none !important; animation:none !important; } }
+</style>
+</head>
+<body>
+<div id="app">
+  <div class="loading-wrap">読み込み中…</div>
+</div>
+
+<script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-firestore-compat.js"></script>
+
+<script>
+(function(){
+  "use strict";
+
+  /* =========== Firebase config ===========
+     セットアップ手順どおりにFirebaseプロジェクトを作成したら、
+     ここを Firebase コンソール > プロジェクトの設定 > 全般 > マイアプリ
+     で表示される設定値に置き換えてください。
+  ============================================ */
+  var firebaseConfig = {
+    apiKey: "AIzaSyAY6V_bAbNpfpb2SIQLAzaOoVQeXtNfj9A",
+    authDomain: "caunseling-agent.firebaseapp.com",
+    projectId: "caunseling-agent",
+    storageBucket: "caunseling-agent.firebasestorage.app",
+    messagingSenderId: "351463136039",
+    appId: "1:351463136039:web:3c1f74ad30d5a79fabe702"
+  };
+
+  var CONFIG_READY = firebaseConfig.apiKey.indexOf("YOUR_") !== 0;
+
+  var JOURNAL_TAGS = ["仕事","将来への不安","人間関係","体調","小さな気づき","挑戦","休息"];
+
+  var INTAKE_SECTIONS = [
+    { id:"childhood", title:"幼少期・家庭環境", lead:"あなたの土台がどう形づくられたかを聞かせてください。", questions:[
+      {id:"q1", label:"家族構成と、それぞれの家族との関係はどうでしたか？（仲の良さ、距離感、記憶に残るエピソードなど）"},
+      {id:"q2", label:"家庭内でよく言われた言葉や、暗黙のルール・価値観は何でしたか？（「勉強しなさい」「お金は大事に」など）"},
+      {id:"q3", label:"幼少期で一番嬉しかった・褒められた記憶と、一番辛かった・傷ついた記憶を教えてください。"},
+      {id:"q4", label:"家庭の経済状況やお金に対する家族の態度は、あなたにどんな影響を与えたと思いますか？"},
+      {id:"q5", label:"当時の自分は、どんな性格の子どもでしたか？（周りからどう見られていたか、自分ではどう思っていたか）"}
+    ]},
+    { id:"school", title:"学生時代・思春期", lead:"自己像が育っていった時期を振り返ります。", questions:[
+      {id:"q1", label:"学校生活の中で、自己肯定感が上がった経験・下がった経験をそれぞれ教えてください。"},
+      {id:"q2", label:"友人関係で印象に残っていること（良いことも悪いことも）は何ですか？"},
+      {id:"q3", label:"「これが得意だ」「これが好きだ」と初めて気づいたのはいつ、何がきっかけでしたか？"},
+      {id:"q4", label:"進路選択（高校・大学・就職など）は、誰の意見が一番影響しましたか？本当はどうしたかったですか？"}
+    ]},
+    { id:"values", title:"価値観の形成", lead:"何を大事にする人間になったのか、その由来を探ります。", questions:[
+      {id:"q1", label:"あなたの「成功」の定義に一番影響を与えた人は誰ですか？その人からどんなメッセージを受け取りましたか？"},
+      {id:"q2", label:"「失敗」に対して、あなたはどんなイメージ・恐怖心を持っていますか？それはどこから来ていると思いますか？"},
+      {id:"q3", label:"今のあなたが大事にしている価値観を3つ挙げるとしたら何ですか？なぜそれが大事だと思いますか？"},
+      {id:"q4", label:"お金・自由・承認・安定・挑戦——この中で今一番求めているものは何ですか？優先順位をつけてみてください。"}
+    ]},
+    { id:"strengths", title:"強み・才能・興味", lead:"あなたが自然に発揮できる力を掘り起こします。", questions:[
+      {id:"q1", label:"時間を忘れて没頭できることは何ですか？最近その状態になったのはいつですか？"},
+      {id:"q2", label:"周りの人からよく褒められること、頼られることは何ですか？"},
+      {id:"q3", label:"自分では当たり前だと思っているけど、実は得意なこと・人と違うことは何だと思いますか？"},
+      {id:"q4", label:"これまでの人生で一番誇れる成果や決断は何ですか？"}
+    ]},
+    { id:"setbacks", title:"過去の挑戦と挫折", lead:"つまずいた経験の中にこそ、パターンが隠れています。", questions:[
+      {id:"q1", label:"これまでに挑戦して途中でやめた・失敗したことを、思いつく限り挙げてください。（仕事、事業、勉強、人間関係、何でも）"},
+      {id:"q2", label:"その中で一番心に残っている挫折について、当時何が起きて、何を感じましたか？"},
+      {id:"q3", label:"その経験から学んだこと、もしくは今も引きずっている感情はありますか？"},
+      {id:"q4", label:"逆に、諦めずにやり遂げたことがあれば教えてください。その時と何が違いましたか？"}
+    ]},
+    { id:"vision", title:"起業・キャリアビジョン", lead:"漠然としたものでも構いません、言葉にしてみましょう。", questions:[
+      {id:"q1", label:"今、漠然とでも考えている「やりたいこと」「起業アイデア」を、思いつく限り書き出してください。"},
+      {id:"q2", label:"5年後・10年後、理想の1日はどんな1日ですか？（場所、仕事内容、収入、周りの人など具体的に）"},
+      {id:"q3", label:"「成功した」と自分で思えるのは、どんな状態になった時ですか？（お金、影響力、自由、家族など）"},
+      {id:"q4", label:"起業や独立を考えたとき、一番の不安・恐れは何ですか？"},
+      {id:"q5", label:"今のあなたを止めているものは何だと思いますか？（スキル、お金、勇気、情報、環境など）"}
+    ]},
+    { id:"mental", title:"メンタル・体調の波", lead:"波のパターンを言語化すると、対処しやすくなります。", questions:[
+      {id:"q1", label:"気分の波を感じるのは、どんな時・どんな状況が多いですか？（曜日、時間帯、人と会った後など）"},
+      {id:"q2", label:"調子が良い時と悪い時、体調面（睡眠・食欲・体の重さなど）にどんな違いがありますか？"},
+      {id:"q3", label:"これまで試したことのある対処法（運動、休息、相談など）で、効果があったもの・なかったものは？"},
+      {id:"q4", label:"「今やっていることが将来につながるのか」という不安は、どんな時に強くなりますか？"}
+    ]},
+    { id:"relationships", title:"人間関係・支え", lead:"あなたを支える人、消耗させる人を整理します。", questions:[
+      {id:"q1", label:"今、悩みを話せる相手はいますか？いない場合、それはなぜだと思いますか？"},
+      {id:"q2", label:"あなたにとって「良い影響を与えてくれる人」「消耗する人」はそれぞれどんな人ですか？"},
+      {id:"q3", label:"尊敬している人・目標にしている人がいれば、誰のどんなところに惹かれますか？"}
+    ]},
+    { id:"present", title:"今の生活・時間の使い方", lead:"今この瞬間の使い方を、正直に棚卸しします。", questions:[
+      {id:"q1", label:"平日と休日、それぞれ典型的な1日の過ごし方を教えてください。"},
+      {id:"q2", label:"今、時間を一番使っていることは何ですか？それは本当にやりたいことですか？"},
+      {id:"q3", label:"「本当はやるべきなのに後回しにしていること」は何ですか？"}
+    ]}
+  ];
+
+  var TOTAL_QUESTIONS = INTAKE_SECTIONS.reduce(function(n,s){ return n + s.questions.length; }, 0);
+
+  var ICONS = {
+    home:'<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M12 8.4 13.5 12 12 15.6 10.5 12z"/></svg>',
+    layers:'<svg viewBox="0 0 24 24"><path d="M12 4 20 8.5 12 13 4 8.5z"/><path d="M4 13 12 17.5 20 13"/><path d="M4 17 12 21.5 20 17"/></svg>',
+    pencil:'<svg viewBox="0 0 24 24"><path d="M4 20 4.9 16.4 15.4 5.9c.6-.6 1.5-.6 2.1 0l1.6 1.6c.6.6.6 1.5 0 2.1L8.6 20.1 4 20z"/><path d="M13.8 7.5 16.5 10.2"/></svg>',
+    check:'<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M8.3 12.3 10.8 14.8 15.9 9.4"/></svg>',
+    chat:'<svg viewBox="0 0 24 24"><path d="M4 5.5h16v10H9.5L5.5 19v-3.5H4z"/></svg>'
+  };
+
+  var DEFAULT_STATE = { meta:{ updatedAt:null }, intake:{}, journal:[], insights:[], actions:[] };
+  var state = JSON.parse(JSON.stringify(DEFAULT_STATE));
+  var tab = sessionStorage.getItem("sc_tab") || "home";
+  var authMode = "login";
+  var authError = "";
+  var currentUser = null;
+  var db = null, auth = null;
+  var unsubSnapshot = null;
+
+  function uid(){ if(window.crypto && crypto.randomUUID) return crypto.randomUUID(); return "id" + Date.now().toString(36) + Math.random().toString(36).slice(2,8); }
+  function todayStr(){ var d = new Date(); return d.getFullYear() + "-" + String(d.getMonth()+1).padStart(2,"0") + "-" + String(d.getDate()).padStart(2,"0"); }
+  function fmtDate(s){ var p = s.split("-"); if(p.length!==3) return s; return p[0]+"年"+parseInt(p[1],10)+"月"+parseInt(p[2],10)+"日"; }
+  function esc(s){ return String(s==null?"":s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;"); }
+  function fmtISO(d){ return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0"); }
+  function avg(arr){ return arr.length ? (arr.reduce(function(a,b){return a+b;},0)/arr.length) : null; }
+  function recentJournal(days){ var cutoff = Date.now() - days*86400000; return state.journal.filter(function(j){ return new Date(j.date+"T00:00:00").getTime() >= cutoff; }); }
+
+  function intakeAnswered(){ var n=0; INTAKE_SECTIONS.forEach(function(sec){ var a=state.intake[sec.id]||{}; sec.questions.forEach(function(q){ if(a[q.id] && a[q.id].trim()) n++; }); }); return n; }
+  function sectionAnswered(sec){ var a = state.intake[sec.id] || {}; return sec.questions.filter(function(q){ return a[q.id] && a[q.id].trim(); }).length; }
+  function streak(){ var dates={}; state.journal.forEach(function(j){ dates[j.date]=true; }); var cur=new Date(); if(!dates[fmtISO(cur)]) cur.setDate(cur.getDate()-1); var n=0; while(dates[fmtISO(cur)]){ n++; cur.setDate(cur.getDate()-1); } return n; }
+
+  /* ---------- persistence (Firestore) ---------- */
+  function docRef(){ return db.collection("users").doc(currentUser.uid); }
+
+  function persist(mutator){
+    var next = JSON.parse(JSON.stringify(state));
+    mutator(next);
+    next.meta.updatedAt = new Date().toISOString();
+    state = next;
+    sessionStorage.setItem("sc_tab", tab);
+    render();
+    docRef().set(next).catch(function(err){
+      console.error(err);
+      render(true);
+    });
+  }
+
+  function attachListener(){
+    if(unsubSnapshot) unsubSnapshot();
+    unsubSnapshot = docRef().onSnapshot(function(snap){
+      if(snap.exists){
+        var data = snap.data();
+        state = Object.assign({}, DEFAULT_STATE, data, {
+          intake: data.intake || {}, journal: data.journal || [], insights: data.insights || [], actions: data.actions || []
+        });
+      } else {
+        docRef().set(state);
+      }
+      render();
+    }, function(err){ console.error(err); render(true); });
+  }
+
+  /* ---------- render helpers ---------- */
+  function sparkline(entries){
+    if(!entries.length) return '<p style="font-size:.82rem">まだ記録がありません。</p>';
+    var w=300,h=64,pad=4,n=entries.length,bw=(w-pad*2)/n;
+    var bars = entries.map(function(e,i){
+      var bh = Math.max(3,(e.mood/10)*(h-pad*2)); var x=pad+i*bw; var y=h-pad-bh;
+      return '<rect x="'+x.toFixed(1)+'" y="'+y.toFixed(1)+'" width="'+Math.max(2,bw-2).toFixed(1)+'" height="'+bh.toFixed(1)+'" rx="2" fill="var(--accent)" opacity="'+(0.45+0.55*(i/n)).toFixed(2)+'"><title>'+esc(e.date)+" 気分"+e.mood+'</title></rect>';
+    }).join("");
+    return '<div class="chart-wrap"><svg viewBox="0 0 '+w+' '+h+'" width="100%" height="'+h+'" preserveAspectRatio="none"><line x1="'+pad+'" y1="'+(h-pad)+'" x2="'+(w-pad)+'" y2="'+(h-pad)+'" stroke="var(--border)" stroke-width="1"/>'+bars+'</svg></div>';
+  }
+  function chipRow(name, options, selected){
+    return options.map(function(o){ var on = selected.indexOf(o) > -1; return '<button type="button" class="chip" data-chip="'+name+'" data-val="'+esc(o)+'" aria-pressed="'+on+'">'+esc(o)+'</button>'; }).join("");
+  }
+
+  function renderHome(){
+    var pct = Math.round((intakeAnswered()/TOTAL_QUESTIONS)*100);
+    var st = streak();
+    var recent = recentJournal(14).slice().sort(function(a,b){ return a.date < b.date ? -1 : 1; });
+    var last30mood = avg(recentJournal(30).map(function(j){return j.mood;}));
+    var lastInsight = state.insights.slice().sort(function(a,b){ return a.date < b.date ? 1 : -1; })[0];
+    var openActions = state.actions.filter(function(a){ return a.status !== "done"; }).length;
+    var welcome = "";
+    if(intakeAnswered()===0 && state.journal.length===0){
+      welcome = '<div class="card"><h3>はじめまして。</h3>' +
+        '<p>ここは、あなただけの内省と相談の記録場所です。まずは「自己分析」タブから、幼少期のことなど、あなた自身について少しずつ教えてください。答える順番や、一度にどこまで書くかはあなたのペースで大丈夫です。</p>' +
+        '<button class="btn btn-primary btn-block" data-nav="intake">自己分析をはじめる</button></div>';
+    }
+    return welcome +
+      '<div class="grid-2">' +
+        '<div class="card stat"><div class="num">'+pct+'%</div><div class="lbl">自己分析の進捗（'+intakeAnswered()+' / '+TOTAL_QUESTIONS+'問）</div></div>' +
+        '<div class="card stat"><div class="num">'+st+'<span style="font-size:.9rem">日</span></div><div class="lbl">連続記録日数</div></div>' +
+        '<div class="card stat"><div class="num">'+(last30mood!==null ? last30mood.toFixed(1) : "—")+'</div><div class="lbl">直近30日の平均気分（10点満点）</div></div>' +
+        '<div class="card stat"><div class="num">'+openActions+'</div><div class="lbl">進行中のアクション</div></div>' +
+      '</div>' +
+      '<div class="card"><h3>気分の推移（直近14日）</h3>' + sparkline(recent) + '</div>' +
+      (lastInsight ? '<div class="card"><h3>最近の気づき</h3><p class="quote-mark">"</p><p style="color:var(--ink)">'+esc(lastInsight.text)+'</p><p style="font-size:.75rem;color:var(--ink-faint);margin-top:.4em">'+fmtDate(lastInsight.date)+(lastInsight.tag?" ・ "+esc(lastInsight.tag):"")+'</p></div>' : "") +
+      '<button class="btn btn-primary btn-block" data-nav="record">今日の記録をつける</button>';
+  }
+
+  function renderIntake(){
+    return '<h2 class="section-title">自己分析</h2>' +
+      '<p class="section-lead">幼少期から今日までを、思い出せる範囲で構いません。書いた分だけ、これから相談したときの理解が深くなります。セクションごとに保存できます。</p>' +
+      INTAKE_SECTIONS.map(function(sec){
+        var answered = sectionAnswered(sec);
+        var a = state.intake[sec.id] || {};
+        var open = sessionStorage.getItem("sc_open_"+sec.id) === "1" ? " open" : "";
+        return '<details class="accordion" data-sec="'+sec.id+'"'+open+'>' +
+          '<summary><span class="s-title">'+esc(sec.title)+'</span><span class="s-meta">'+answered+' / '+sec.questions.length+'</span></summary>' +
+          '<div class="s-body">' + '<p style="font-size:.82rem;margin:0">'+esc(sec.lead)+'</p>' +
+            sec.questions.map(function(q){
+              return '<div class="q-block"><div class="q-label">'+esc(q.label)+'</div>' +
+                '<textarea data-intake-sec="'+sec.id+'" data-intake-q="'+q.id+'" placeholder="思い浮かんだことを、そのまま書いてください">'+esc(a[q.id]||"")+'</textarea></div>';
+            }).join("") +
+            '<button class="btn btn-primary btn-small" data-save-intake="'+sec.id+'">このセクションを保存</button>' +
+          '</div></details>';
+      }).join("");
+  }
+
+  function renderRecord(){
+    var journalSorted = state.journal.slice().sort(function(a,b){ return a.date < b.date ? 1 : -1; });
+    var insightsSorted = state.insights.slice().sort(function(a,b){ return a.date < b.date ? 1 : -1; });
+    return '<h2 class="section-title">記録</h2>' +
+      '<p class="section-lead">今日の気分と、頭に浮かんだ小さな気づきを残しておきましょう。</p>' +
+      '<div class="card" id="journal-form"><h3>今日の記録</h3><div class="col">' +
+        '<div><label class="field-label">日付</label><input class="input" type="date" id="j-date" value="'+todayStr()+'"></div>' +
+        '<div><label class="field-label">気分（1〜10）: <span id="j-mood-val">6</span></label><input type="range" min="1" max="10" value="6" id="j-mood"></div>' +
+        '<div><label class="field-label">エネルギー（1〜10）: <span id="j-energy-val">6</span></label><input type="range" min="1" max="10" value="6" id="j-energy"></div>' +
+        '<div><label class="field-label">関係するタグ</label><div class="row" id="j-tags">'+chipRow("j",JOURNAL_TAGS,[])+'</div></div>' +
+        '<div><label class="field-label">感じたこと・頭に浮かんだこと</label><textarea id="j-note" placeholder="今日はどんな一日でしたか"></textarea></div>' +
+        '<button class="btn btn-primary" id="j-submit">記録を保存</button>' +
+      '</div></div>' +
+      '<div class="card" id="insight-form"><h3>小さな気づき</h3><p style="font-size:.82rem">会話の中でふと浮かんだ気づきを、その場で残せます。</p><div class="col">' +
+        '<textarea id="i-text" placeholder="例：人と比べて焦る時は、大抵寝不足だと気づいた"></textarea>' +
+        '<input class="input" id="i-tag" placeholder="タグ（任意：キャリア／人間関係／体調 など）">' +
+        '<button class="btn btn-ghost" id="i-submit">気づきを追加</button>' +
+      '</div></div>' +
+      '<div class="card"><h3>これまでの記録</h3>' +
+        (journalSorted.length ? journalSorted.slice(0,60).map(function(j){
+          return '<div class="entry"><div class="entry-head"><span class="entry-date">'+fmtDate(j.date)+'</span><span class="entry-scores">気分 '+j.mood+' ・ エネルギー '+j.energy+'</span></div>' +
+            (j.tags && j.tags.length ? '<div class="entry-tags">'+j.tags.map(function(t){return '<span class="tag-pill">'+esc(t)+'</span>';}).join("")+'</div>' : "") +
+            (j.note ? '<div class="entry-note">'+esc(j.note)+'</div>' : "") + '</div>';
+        }).join("") : '<div class="empty">まだ記録がありません。</div>') + '</div>' +
+      '<div class="card"><h3>気づきログ</h3>' +
+        (insightsSorted.length ? insightsSorted.slice(0,60).map(function(i){
+          return '<div class="entry"><div class="entry-head"><span class="entry-date">'+fmtDate(i.date)+'</span>'+(i.tag?'<span class="insight-tag">'+esc(i.tag)+'</span>':'')+'</div><div class="entry-note">'+esc(i.text)+'</div></div>';
+        }).join("") : '<div class="empty">まだ気づきがありません。</div>') + '</div>';
+  }
+
+  function renderActions(){
+    var order = {todo:0, doing:1, done:2};
+    var sorted = state.actions.slice().sort(function(a,b){ return order[a.status]-order[b.status]; });
+    return '<h2 class="section-title">アクション</h2>' +
+      '<p class="section-lead">ビジョンを、小さな次の一歩に分解しておきます。</p>' +
+      '<div class="card"><div class="row"><input class="input" id="a-title" placeholder="次にやること" style="flex:1;min-width:10rem"><button class="btn btn-primary" id="a-submit">追加</button></div></div>' +
+      '<div class="card">' + (sorted.length ? sorted.map(function(a){
+        return '<div class="action-row'+(a.status==="done"?" done":"")+'" data-action="'+a.id+'">' +
+          '<span class="a-title">'+esc(a.title)+'</span>' +
+          '<select class="status-select" data-action-status="'+a.id+'">' +
+            '<option value="todo"'+(a.status==="todo"?" selected":"")+'>未着手</option>' +
+            '<option value="doing"'+(a.status==="doing"?" selected":"")+'>進行中</option>' +
+            '<option value="done"'+(a.status==="done"?" selected":"")+'>完了</option>' +
+          '</select>' +
+          '<button class="icon-btn" data-action-del="'+a.id+'" aria-label="削除">✕</button></div>';
+      }).join("") : '<div class="empty">まだアクションがありません。</div>') + '</div>';
+  }
+
+  function buildSummary(){
+    var lines = [];
+    lines.push("あなたは資格を持つ一流のキャリア・メンタルカウンセラーです。以下はマサルさんについて、これまでに蓄積されたプロフィールと最近の記録です。");
+    lines.push("この情報をもとに、(1)今のマサルさんの状況と傾向の分析 (2)気をつけたほうがよいパターン (3)次の一歩の具体的な提案 を、共感的かつ実践的に伝えてください。");
+    lines.push("");
+    lines.push("【自己分析プロフィール】");
+    var any = false;
+    INTAKE_SECTIONS.forEach(function(sec){
+      var a = state.intake[sec.id] || {};
+      var qs = sec.questions.filter(function(q){ return a[q.id] && a[q.id].trim(); });
+      if(!qs.length) return;
+      any = true;
+      lines.push("■"+sec.title);
+      qs.forEach(function(q){ lines.push("Q. "+q.label); lines.push("A. "+a[q.id].trim()); });
+      lines.push("");
+    });
+    if(!any) lines.push("（まだ自己分析の回答がありません）");
+    lines.push("【直近30日の記録】");
+    var rj = recentJournal(30).slice().sort(function(a,b){ return a.date < b.date ? -1 : 1; });
+    if(rj.length){ rj.forEach(function(j){ lines.push(j.date+" 気分:"+j.mood+"/10 エネルギー:"+j.energy+"/10"+(j.tags&&j.tags.length?" タグ:"+j.tags.join(","):"")); if(j.note) lines.push("  メモ: "+j.note); }); }
+    else lines.push("（記録なし）");
+    lines.push("");
+    lines.push("【気づきログ（最近20件）】");
+    var ri = state.insights.slice().sort(function(a,b){ return a.date < b.date ? 1 : -1; }).slice(0,20);
+    if(ri.length){ ri.forEach(function(i){ lines.push(i.date+(i.tag?" ["+i.tag+"]":"")+" "+i.text); }); } else lines.push("（記録なし）");
+    lines.push("");
+    lines.push("【現在のアクション】");
+    if(state.actions.length){ var labelMap={todo:"未着手",doing:"進行中",done:"完了"}; state.actions.forEach(function(a){ lines.push("- ["+labelMap[a.status]+"] "+a.title); }); } else lines.push("（登録なし）");
+    return lines.join("\n");
+  }
+
+  function renderConsult(){
+    return '<h2 class="section-title">Claudeに相談</h2>' +
+      '<p class="section-lead">このアプリ自体はデータの保管庫です。実際の対話やアドバイスは、下のサマリーをClaudeとの会話に貼り付けて始めてください。</p>' +
+      '<div class="card"><h3>使い方</h3><p style="font-size:.88rem">① 下のボタンでサマリーを作成 → ② コピー → ③ Claudeとの会話に貼り付けて相談を始める。</p></div>' +
+      '<button class="btn btn-primary btn-block" id="c-build">相談用サマリーを作成</button>' +
+      '<div class="card" id="c-result" hidden><h3>サマリー</h3><div class="summary-box" id="c-text"></div>' +
+        '<div class="row" style="margin-top:.8rem"><button class="btn btn-ghost" id="c-copy">コピーする</button><span id="c-copy-msg" style="font-size:.78rem;color:var(--ink-faint)"></span></div></div>' +
+      '<div class="card"><h3>データの保管について</h3><p style="font-size:.82rem">この記録はあなたのFirebaseアカウントに保存されています。Claude側には自動送信されません。相談したいときだけ、このサマリーを自分でコピーして渡してください。</p></div>';
+  }
+
+  var TABS = [
+    {id:"home", label:"ホーム", icon:"home", render:renderHome},
+    {id:"intake", label:"自己分析", icon:"layers", render:renderIntake},
+    {id:"record", label:"記録", icon:"pencil", render:renderRecord},
+    {id:"actions", label:"アクション", icon:"check", render:renderActions},
+    {id:"consult", label:"相談", icon:"chat", render:renderConsult}
+  ];
+
+  function renderAuth(){
+    var app = document.getElementById("app");
+    app.innerHTML =
+      '<div class="auth-wrap"><div class="card auth-card">' +
+        '<h1>セルフコンパス</h1><p class="lead">あなた専用の記録アプリです</p>' +
+        '<div class="auth-tabs">' +
+          '<button data-auth-tab="login" aria-selected="'+(authMode==="login")+'">ログイン</button>' +
+          '<button data-auth-tab="signup" aria-selected="'+(authMode==="signup")+'">新規登録</button>' +
+        '</div>' +
+        (authError ? '<div class="banner" style="margin-bottom:1rem">'+esc(authError)+'</div>' : "") +
+        '<div class="col">' +
+          '<div><label class="field-label">メールアドレス</label><input class="input" type="email" id="auth-email" autocomplete="email"></div>' +
+          '<div><label class="field-label">パスワード（6文字以上）</label><input class="input" type="password" id="auth-pw" autocomplete="'+(authMode==="signup"?"new-password":"current-password")+'"></div>' +
+          '<button class="btn btn-primary btn-block" id="auth-submit">'+(authMode==="login"?"ログイン":"アカウントを作成")+'</button>' +
+        '</div>' +
+      '</div></div>';
+
+    app.querySelectorAll("[data-auth-tab]").forEach(function(b){
+      b.addEventListener("click", function(){ authMode = b.getAttribute("data-auth-tab"); authError=""; renderAuth(); });
+    });
+    app.querySelector("#auth-submit").addEventListener("click", function(){
+      var email = app.querySelector("#auth-email").value.trim();
+      var pw = app.querySelector("#auth-pw").value;
+      authError = "";
+      var fn = authMode === "login" ? auth.signInWithEmailAndPassword(email, pw) : auth.createUserWithEmailAndPassword(email, pw);
+      fn.catch(function(err){ authError = err.message; renderAuth(); });
+    });
+  }
+
+  function render(errorFlag){
+    if(!currentUser){ renderAuth(); return; }
+    var app = document.getElementById("app");
+    var active = TABS.filter(function(t){ return t.id===tab; })[0] || TABS[0];
+    var banner = errorFlag ? '<div class="banner">保存に失敗しました。通信状況を確認してもう一度お試しください。</div>' : "";
+    app.innerHTML =
+      '<div class="shell">' +
+        '<div class="topbar"><span class="brand">セルフコンパス</span><span class="right"><span class="streak">連続 '+streak()+'日</span><button class="logout" id="logout-btn">ログアウト</button></span></div>' +
+        '<main>' + banner + active.render() + '</main>' +
+        '<nav class="bottombar"><div class="inner">' +
+          TABS.map(function(t){ return '<button data-tab="'+t.id+'" aria-current="'+(t.id===tab)+'">'+ICONS[t.icon]+'<span>'+t.label+'</span></button>'; }).join("") +
+        '</div></nav>' +
+      '</div>';
+    wireEvents(app);
+  }
+
+  function wireEvents(app){
+    app.querySelector("#logout-btn").addEventListener("click", function(){ auth.signOut(); });
+    app.querySelectorAll("[data-tab]").forEach(function(b){ b.addEventListener("click", function(){ tab=b.getAttribute("data-tab"); sessionStorage.setItem("sc_tab",tab); render(); }); });
+    app.querySelectorAll("[data-nav]").forEach(function(b){ b.addEventListener("click", function(){ tab=b.getAttribute("data-nav"); sessionStorage.setItem("sc_tab",tab); render(); }); });
+    app.querySelectorAll("details.accordion").forEach(function(d){ d.addEventListener("toggle", function(){ sessionStorage.setItem("sc_open_"+d.getAttribute("data-sec"), d.open?"1":"0"); }); });
+    app.querySelectorAll("[data-save-intake]").forEach(function(btn){
+      btn.addEventListener("click", function(){
+        var secId = btn.getAttribute("data-save-intake"); var vals = {};
+        app.querySelectorAll('[data-intake-sec="'+secId+'"]').forEach(function(ta){ vals[ta.getAttribute("data-intake-q")] = ta.value; });
+        persist(function(next){ next.intake[secId] = Object.assign({}, next.intake[secId]||{}, vals); });
+      });
+    });
+    var moodEl=app.querySelector("#j-mood"), moodVal=app.querySelector("#j-mood-val");
+    var energyEl=app.querySelector("#j-energy"), energyVal=app.querySelector("#j-energy-val");
+    if(moodEl) moodEl.addEventListener("input", function(){ moodVal.textContent = moodEl.value; });
+    if(energyEl) energyEl.addEventListener("input", function(){ energyVal.textContent = energyEl.value; });
+    var jTags = [];
+    app.querySelectorAll('[data-chip="j"]').forEach(function(chip){
+      chip.addEventListener("click", function(){
+        var v = chip.getAttribute("data-val"); var i = jTags.indexOf(v);
+        if(i>-1){ jTags.splice(i,1); chip.setAttribute("aria-pressed","false"); } else { jTags.push(v); chip.setAttribute("aria-pressed","true"); }
+      });
+    });
+    var jSubmit = app.querySelector("#j-submit");
+    if(jSubmit) jSubmit.addEventListener("click", function(){
+      var date = app.querySelector("#j-date").value || todayStr();
+      var mood = parseInt(app.querySelector("#j-mood").value,10);
+      var energy = parseInt(app.querySelector("#j-energy").value,10);
+      var note = app.querySelector("#j-note").value.trim();
+      persist(function(next){ next.journal = next.journal.filter(function(j){ return j.date !== date; }); next.journal.push({ id:uid(), date:date, mood:mood, energy:energy, note:note, tags:jTags.slice() }); });
+    });
+    var iSubmit = app.querySelector("#i-submit");
+    if(iSubmit) iSubmit.addEventListener("click", function(){
+      var text = app.querySelector("#i-text").value.trim(); if(!text) return;
+      var t = app.querySelector("#i-tag").value.trim();
+      persist(function(next){ next.insights.unshift({ id:uid(), date:todayStr(), text:text, tag:t }); });
+    });
+    var aSubmit = app.querySelector("#a-submit");
+    if(aSubmit) aSubmit.addEventListener("click", function(){
+      var titleEl = app.querySelector("#a-title"); var title = titleEl.value.trim(); if(!title) return;
+      persist(function(next){ next.actions.unshift({ id:uid(), title:title, status:"todo", createdAt:todayStr() }); });
+    });
+    app.querySelectorAll("[data-action-status]").forEach(function(sel){
+      sel.addEventListener("change", function(){ var id=sel.getAttribute("data-action-status"); var v=sel.value; persist(function(next){ next.actions.forEach(function(a){ if(a.id===id) a.status=v; }); }); });
+    });
+    app.querySelectorAll("[data-action-del]").forEach(function(btn){
+      btn.addEventListener("click", function(){ var id=btn.getAttribute("data-action-del"); persist(function(next){ next.actions = next.actions.filter(function(a){ return a.id!==id; }); }); });
+    });
+    var cBuild = app.querySelector("#c-build");
+    if(cBuild) cBuild.addEventListener("click", function(){
+      var text = buildSummary();
+      app.querySelector("#c-text").textContent = text;
+      app.querySelector("#c-result").hidden = false;
+      var cCopy = app.querySelector("#c-copy");
+      cCopy.onclick = function(){
+        var msg = app.querySelector("#c-copy-msg");
+        if(navigator.clipboard && navigator.clipboard.writeText){
+          navigator.clipboard.writeText(text).then(function(){ msg.textContent = "コピーしました"; }).catch(function(){ msg.textContent = "コピーできませんでした。上のテキストを選択してコピーしてください。"; });
+        } else { msg.textContent = "上のテキストを選択してコピーしてください。"; }
+      };
+    });
+  }
+
+  function boot(){
+    if(!CONFIG_READY){
+      document.getElementById("app").innerHTML = '<div class="loading-wrap" style="flex-direction:column;gap:.8rem;padding:2rem;text-align:center">' +
+        '<p style="max-width:26rem">Firebaseの設定がまだ入っていません。Claudeとの会話でFirebaseプロジェクトの設定値を伝えて、このファイルを完成させてもらってください。</p></div>';
+      return;
+    }
+    firebase.initializeApp(firebaseConfig);
+    auth = firebase.auth();
+    db = firebase.firestore();
+    auth.onAuthStateChanged(function(user){
+      currentUser = user;
+      if(user){ attachListener(); } else { if(unsubSnapshot){ unsubSnapshot(); unsubSnapshot=null; } state = JSON.parse(JSON.stringify(DEFAULT_STATE)); render(); }
+    });
+  }
+
+  boot();
+})();
+</script>
+</body>
+</html>
