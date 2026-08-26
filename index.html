@@ -582,7 +582,7 @@
       (chatError ? '<div class="banner">'+esc(chatError)+'</div>' : "") +
       '<div class="card"><div class="col">' +
         '<textarea id="chat-input" placeholder="今の気持ちや相談したいことを書いてください（Enterで送信、Shift+Enterで改行）"></textarea>' +
-        '<button class="btn btn-primary" id="chat-send"'+(chatPending?" disabled":"")+'>送信する</button>' +
+        '<button class="btn btn-primary" id="chat-send"'+(chatPending?" disabled":"")+'>送信する（ダブルクリック）</button>' +
       '</div></div>' +
       '<details class="accordion"><summary><span class="s-title">送信される情報を確認する</span></summary>' +
         '<div class="s-body"><p style="font-size:.8rem;margin:0">毎回のメッセージと一緒に、これまでの自己分析・記録・目標のサマリーがAIに送られます。内容は以下の通りです。</p>' +
@@ -735,14 +735,15 @@
     });
     var chatSend = app.querySelector("#chat-send");
     var chatInput = app.querySelector("#chat-input");
-    if(chatSend) chatSend.addEventListener("click", function(){
+    function doSendChat(){
       if(chatPending) return;
       var text = chatInput.value.trim(); if(!text) return;
       chatInput.value = "";
       sendChatMessage(text);
-    });
+    }
+    if(chatSend) chatSend.addEventListener("dblclick", doSendChat);
     if(chatInput) chatInput.addEventListener("keydown", function(e){
-      if(e.key === "Enter" && !e.shiftKey){ e.preventDefault(); if(chatSend) chatSend.click(); }
+      if(e.key === "Enter" && !e.shiftKey){ e.preventDefault(); doSendChat(); }
     });
     scrollChatToBottom(app);
   }
