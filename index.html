@@ -139,6 +139,16 @@
   .icon-btn{ background:none; border:none; color:var(--ink-faint); cursor:pointer; font-size:1rem; padding:.2em .4em; }
   .icon-btn:hover{ color:var(--clay); }
 
+  .cat-dot{ display:inline-block; width:.62em; height:.62em; border-radius:50%; margin-right:.4em; vertical-align:middle; flex-shrink:0; }
+  .color-chip{ width:1.9em; height:1.9em; padding:0; border-radius:50%; border-width:2px; }
+  .color-chip[aria-pressed="true"]{ box-shadow:0 0 0 2px var(--surface), 0 0 0 4px var(--ink); }
+  .change-pill{ font-size:.78rem; padding:.32em .8em; border-radius:999px; font-variant-numeric:tabular-nums; font-weight:500; white-space:nowrap; }
+  .change-pill.up{ background:var(--accent-soft); color:var(--accent-strong); }
+  .change-pill.down{ background:var(--clay-soft); color:var(--clay); }
+  .change-pill.flat{ background:var(--surface-2); color:var(--ink-faint); }
+  .range-label{ font-size:.78rem; color:var(--ink-faint); }
+  .range-total{ font-size:1.05rem; font-weight:600; font-variant-numeric:tabular-nums; }
+
   nav.bottombar{ position:fixed; left:0; right:0; bottom:0; z-index:20; display:flex; justify-content:center; }
   nav.bottombar .inner{ max-width:720px; width:100%; display:flex; background:color-mix(in srgb, var(--surface) 96%, transparent); backdrop-filter:blur(10px); border-top:1px solid var(--border); padding:.4rem .4rem calc(.4rem + env(safe-area-inset-bottom)); }
   nav.bottombar button{ flex:1; background:none; border:none; cursor:pointer; padding:.45rem .2rem; display:flex; flex-direction:column; align-items:center; gap:.22rem; color:var(--ink-faint); font-size:.68rem; }
@@ -211,6 +221,21 @@
   var chatError = "";
   var chatEnterArmedAt = 0;
 
+  var goalsSubTab = sessionStorage.getItem("sc_goals_sub") || "goals";
+  var analyticsPeriod = sessionStorage.getItem("sc_ap") || "1W";
+  var timerTickInterval = null;
+
+  var CATEGORY_COLORS = [
+    { id:"lime", hex:"#9FD356" },
+    { id:"blue", hex:"#4C6FD6" },
+    { id:"rose", hex:"#D6607A" },
+    { id:"gold", hex:"#D9A63E" },
+    { id:"teal", hex:"#3E9E96" },
+    { id:"violet", hex:"#8266C9" },
+    { id:"clay2", hex:"#C06B4E" },
+    { id:"slate", hex:"#6B7280" }
+  ];
+
   var JOURNAL_TAGS = ["仕事","将来への不安","人間関係","体調","小さな気づき","挑戦","休息"];
 
   var INTAKE_SECTIONS = [
@@ -281,7 +306,7 @@
     chat:'<svg viewBox="0 0 24 24"><path d="M4 5.5h16v10H9.5L5.5 19v-3.5H4z"/></svg>'
   };
 
-  var DEFAULT_STATE = { meta:{ updatedAt:null }, intake:{}, journal:[], insights:[], actions:[], goals:[], chatHistory:[] };
+  var DEFAULT_STATE = { meta:{ updatedAt:null }, intake:{}, journal:[], insights:[], actions:[], goals:[], chatHistory:[], categories:[], timeSessions:[], schedule:[], timer:{ categoryId:null, startedAt:null } };
   var state = JSON.parse(JSON.stringify(DEFAULT_STATE));
   var tab = sessionStorage.getItem("sc_tab") || "home";
   var authMode = "login";
@@ -301,6 +326,122 @@
   function intakeAnswered(){ var n=0; INTAKE_SECTIONS.forEach(function(sec){ var a=state.intake[sec.id]||{}; sec.questions.forEach(function(q){ if(a[q.id] && a[q.id].trim()) n++; }); }); return n; }
   function sectionAnswered(sec){ var a = state.intake[sec.id] || {}; return sec.questions.filter(function(q){ return a[q.id] && a[q.id].trim(); }).length; }
   function streak(){ var dates={}; state.journal.forEach(function(j){ dates[j.date]=true; }); var cur=new Date(); if(!dates[fmtISO(cur)]) cur.setDate(cur.getDate()-1); var n=0; while(dates[fmtISO(cur)]){ n++; cur.setDate(cur.getDate()-1); } return n; }
+
+  /* ---------- effort tracking helpers ---------- */
+  function colorHex(id){ var c = CATEGORY_COLORS.filter(function(c){ return c.id===id; })[0]; return c ? c.hex : "#8B8C78"; }
+  function catById(id){ return (state.categories||[]).filter(function(c){ return c.id===id; })[0]; }
+  function minToHM(min){ min = Math.max(0, Math.round(min)); var h = Math.floor(min/60), m = min%60; return h>0 ? (h+"h"+m+"m") : (m+"m"); }
+  function sumMinutes(sessions){ return sessions.reduce(function(a,s){ return a+s.durationMin; }, 0); }
+  function timeStreak(){ var dates={}; (state.timeSessions||[]).forEach(function(s){ dates[s.date]=true; }); var cur=new Date(); if(!dates[fmtISO(cur)]) cur.setDate(cur.getDate()-1); var n=0; while(dates[fmtISO(cur)]){ n++; cur.setDate(cur.getDate()-1); } return n; }
+  function timeStrToMin(s){ var p=s.split(":"); return parseInt(p[0],10)*60+parseInt(p[1],10); }
+  function minToTimeStr(m){ var h=Math.floor(m/60), mm=m%60; return String(h).padStart(2,"0")+":"+String(mm).padStart(2,"0"); }
+  function elapsedStr(startedAtISO){
+    var ms = Date.now() - new Date(startedAtISO).getTime(); if(ms<0) ms=0;
+    var totalSec = Math.floor(ms/1000);
+    var h=Math.floor(totalSec/3600), m=Math.floor((totalSec%3600)/60), s=totalSec%60;
+    return String(h).padStart(2,"0")+":"+String(m).padStart(2,"0")+":"+String(s).padStart(2,"0");
+  }
+
+  function rangeStrs(period, which){
+    var today = new Date(); today.setHours(0,0,0,0);
+    var days = period==="1W" ? 7 : period==="1M" ? 30 : null;
+    if(days){
+      var curStart = new Date(today); curStart.setDate(curStart.getDate()-(days-1));
+      var curEndExcl = new Date(today); curEndExcl.setDate(curEndExcl.getDate()+1);
+      if(which==="current") return { startStr:fmtISO(curStart), endStr:fmtISO(curEndExcl) };
+      var prevStart = new Date(curStart); prevStart.setDate(prevStart.getDate()-days);
+      return { startStr:fmtISO(prevStart), endStr:fmtISO(curStart) };
+    }
+    var curStart2 = new Date(today.getFullYear()-1, today.getMonth(), today.getDate()+1);
+    var curEndExcl2 = new Date(today); curEndExcl2.setDate(curEndExcl2.getDate()+1);
+    if(which==="current") return { startStr:fmtISO(curStart2), endStr:fmtISO(curEndExcl2) };
+    var prevStart2 = new Date(curStart2.getFullYear()-1, curStart2.getMonth(), curStart2.getDate());
+    return { startStr:fmtISO(prevStart2), endStr:fmtISO(curStart2) };
+  }
+  function sumInRange(sessions, startStr, endStr, catId){
+    return sessions.filter(function(s){ return s.date>=startStr && s.date<endStr && (!catId || s.categoryId===catId); }).reduce(function(a,s){ return a+s.durationMin; }, 0);
+  }
+  function aggregateCategories(sessions, startStr, endStr){
+    var inRange = sessions.filter(function(s){ return s.date>=startStr && s.date<endStr; });
+    var map = {};
+    inRange.forEach(function(s){
+      var c = catById(s.categoryId);
+      if(!map[s.categoryId]) map[s.categoryId] = { id:s.categoryId, name: c?c.name:"削除済みカテゴリ", color: c?c.color:"slate", minutes:0, count:0 };
+      map[s.categoryId].minutes += s.durationMin;
+      map[s.categoryId].count += 1;
+    });
+    return Object.keys(map).map(function(k){ return map[k]; }).sort(function(a,b){ return b.minutes-a.minutes; });
+  }
+  function shortRangeLabel(startStr, endStrExcl){
+    function short(s){ var p=s.split("-"); return parseInt(p[1],10)+"/"+parseInt(p[2],10); }
+    var endInc = new Date(endStrExcl+"T00:00:00"); endInc.setDate(endInc.getDate()-1);
+    var endIncStr = fmtISO(endInc);
+    var endLabel = endIncStr===todayStr() ? "今日" : short(endIncStr);
+    return short(startStr)+"〜"+endLabel;
+  }
+  function pctChangePill(cur, prev){
+    if(prev===0 && cur===0) return '<span class="change-pill flat">±0%</span>';
+    if(prev===0) return '<span class="change-pill up">New</span>';
+    var v = ((cur-prev)/prev)*100;
+    var cls = v>=0 ? "up" : "down";
+    var sign = v>=0 ? "+" : "";
+    return '<span class="change-pill '+cls+'">'+sign+v.toFixed(1)+'%</span>';
+  }
+  function pctChangeSpan(cur, prev){
+    if(prev===0 && cur===0) return '<span style="font-size:.72rem;color:var(--ink-faint)">±0%</span>';
+    if(prev===0) return '<span style="font-size:.72rem;color:var(--accent-strong)">New</span>';
+    var v = ((cur-prev)/prev)*100;
+    var color = v>=0 ? "var(--accent-strong)" : "var(--clay)";
+    var sign = v>=0 ? "+" : "";
+    return '<span style="font-size:.72rem;color:'+color+'">'+sign+v.toFixed(1)+'%</span>';
+  }
+  function chartBuckets(period){
+    var today = new Date(); today.setHours(0,0,0,0);
+    if(period==="1W"){
+      var arr=[]; for(var i=6;i>=0;i--){ var d=new Date(today); d.setDate(d.getDate()-i); arr.push({ label:["日","月","火","水","木","金","土"][d.getDay()], dateStr:fmtISO(d) }); } return arr;
+    }
+    if(period==="1M"){
+      var arr2=[]; for(var j=29;j>=0;j--){ var d2=new Date(today); d2.setDate(d2.getDate()-j); arr2.push({ label:String(d2.getDate()), dateStr:fmtISO(d2) }); } return arr2;
+    }
+    var arr3=[]; for(var k=11;k>=0;k--){ var d3=new Date(today.getFullYear(), today.getMonth()-k, 1); var ms=d3.getFullYear()+"-"+String(d3.getMonth()+1).padStart(2,"0"); arr3.push({ label:(d3.getMonth()+1)+"月", monthStr:ms }); } return arr3;
+  }
+  function bucketValue(sessions, b, catId){
+    if(b.monthStr) return sessions.filter(function(s){ return s.date.slice(0,7)===b.monthStr && (!catId||s.categoryId===catId); }).reduce(function(a,s){ return a+s.durationMin; }, 0);
+    return sessions.filter(function(s){ return s.date===b.dateStr && (!catId||s.categoryId===catId); }).reduce(function(a,s){ return a+s.durationMin; }, 0);
+  }
+  function timeBarChart(period, sessions){
+    var buckets = chartBuckets(period);
+    var values = buckets.map(function(b){ return bucketValue(sessions, b); });
+    var max = Math.max.apply(null, values.concat([1]));
+    var avgVal = values.reduce(function(a,b){ return a+b; }, 0) / values.length;
+    var perBar = period==="1M" ? 9 : period==="1Y" ? 26 : 40;
+    var w = Math.max(300, buckets.length*perBar);
+    var h=120, padB=16, padT=10;
+    var bw = w/buckets.length;
+    var avgY = h-padB-(max>0 ? (avgVal/max)*(h-padB-padT) : 0);
+    var showLabelEvery = period==="1M" ? 7 : 1;
+    var bars = buckets.map(function(b,i){
+      var val=values[i]; var bh = val>0 ? Math.max(3,(val/max)*(h-padB-padT)) : 0;
+      var x=i*bw+bw*0.18, bw2=bw*0.64, y=h-padB-bh;
+      var label = (i%showLabelEvery===0) ? '<text x="'+(x+bw2/2).toFixed(1)+'" y="'+(h-3)+'" font-size="8" fill="var(--ink-faint)" text-anchor="middle">'+esc(b.label)+'</text>' : "";
+      return '<rect x="'+x.toFixed(1)+'" y="'+y.toFixed(1)+'" width="'+bw2.toFixed(1)+'" height="'+bh.toFixed(1)+'" rx="2" fill="var(--accent)"><title>'+esc(b.label)+" "+minToHM(val)+'</title></rect>' + label;
+    }).join("");
+    return '<div class="chart-wrap"><svg viewBox="0 0 '+w+' '+h+'" width="100%" height="'+h+'" preserveAspectRatio="xMinYMid meet">' +
+      '<line x1="0" y1="'+avgY.toFixed(1)+'" x2="'+w+'" y2="'+avgY.toFixed(1)+'" stroke="var(--gold)" stroke-width="1" stroke-dasharray="4 3"/>' +
+      '<text x="'+w+'" y="'+(avgY-3).toFixed(1)+'" font-size="8" fill="var(--gold)" text-anchor="end">平均</text>' +
+      bars + '</svg></div>';
+  }
+  function donutChart(catAgg, total){
+    var cx=54, cy=54, r=42, circ=2*Math.PI*r, offset=0;
+    if(total<=0) return '<svg viewBox="0 0 108 108" width="108" height="108"><circle cx="'+cx+'" cy="'+cy+'" r="'+r+'" fill="none" stroke="var(--surface-2)" stroke-width="13"/></svg>';
+    var segs = catAgg.map(function(c){
+      var frac = c.minutes/total, dash = frac*circ;
+      var seg = '<circle cx="'+cx+'" cy="'+cy+'" r="'+r+'" fill="none" stroke="'+colorHex(c.color)+'" stroke-width="13" stroke-dasharray="'+dash.toFixed(1)+' '+(circ-dash).toFixed(1)+'" stroke-dashoffset="'+(-offset).toFixed(1)+'" transform="rotate(-90 '+cx+' '+cy+')"><title>'+esc(c.name)+" "+Math.round(frac*100)+"%"+'</title></circle>';
+      offset += dash;
+      return seg;
+    }).join("");
+    return '<svg viewBox="0 0 108 108" width="108" height="108">'+segs+'</svg>';
+  }
 
   /* ---------- persistence (Firestore) ---------- */
   function docRef(){ return db.collection("users").doc(currentUser.uid); }
@@ -324,7 +465,8 @@
       if(snap.exists){
         var data = snap.data();
         state = Object.assign({}, DEFAULT_STATE, data, {
-          intake: data.intake || {}, journal: data.journal || [], insights: data.insights || [], actions: data.actions || [], goals: data.goals || [], chatHistory: data.chatHistory || []
+          intake: data.intake || {}, journal: data.journal || [], insights: data.insights || [], actions: data.actions || [], goals: data.goals || [], chatHistory: data.chatHistory || [],
+          categories: data.categories || [], timeSessions: data.timeSessions || [], schedule: data.schedule || [], timer: data.timer || { categoryId:null, startedAt:null }
         });
       } else {
         docRef().set(state);
@@ -470,13 +612,12 @@
     '</div></div>';
   }
 
-  function renderGoals(){
+  function renderGoalsList(){
     var sorted = state.goals.slice().sort(function(a,b){
       if(a.status !== b.status) return a.status==="done" ? 1 : -1;
       return (a.createdAt < b.createdAt) ? 1 : -1;
     });
-    return '<h2 class="section-title">目標</h2>' +
-      '<p class="section-lead">目指す姿を具体的な目標に分解し、定期的に「どれだけ近づいたか」を記録します。迷いの中でも、進んでいる実感を数字で残せます。</p>' +
+    return '<p class="section-lead">目指す姿を具体的な目標に分解し、定期的に「どれだけ近づいたか」を記録します。迷いの中でも、進んでいる実感を数字で残せます。</p>' +
       '<div class="card"><h3>新しい目標</h3><div class="col">' +
         '<div><label class="field-label">目標</label><input class="input" id="g-title" placeholder="例：最初の有料顧客を獲得する"></div>' +
         '<div><label class="field-label">成功の定義（達成したと言えるのはどんな状態か）</label><textarea id="g-def" placeholder="例：月額契約のお客様が1人以上いる状態"></textarea></div>' +
@@ -484,6 +625,142 @@
         '<button class="btn btn-primary" id="g-submit">目標を追加</button>' +
       '</div></div>' +
       (sorted.length ? sorted.map(renderGoalCard).join("") : '<div class="empty">まだ目標が登録されていません。</div>');
+  }
+
+  function renderCategoryManager(){
+    var cats = state.categories || [];
+    return '<details class="accordion"><summary><span class="s-title">カテゴリを管理</span><span class="s-meta">'+cats.length+'件</span></summary><div class="s-body">' +
+      '<div class="col">' +
+        '<input class="input" id="c-name" placeholder="カテゴリ名（例：読書）">' +
+        '<div class="row" id="c-color-row">'+CATEGORY_COLORS.map(function(c,i){ return '<button type="button" class="chip color-chip" data-color="'+c.id+'" aria-pressed="'+(i===0)+'" style="background:'+c.hex+';border-color:'+c.hex+'" aria-label="色を選択"></button>'; }).join("")+'</div>' +
+        '<button class="btn btn-primary btn-small" id="c-submit">カテゴリを追加</button>' +
+      '</div>' +
+      (cats.length ? cats.map(function(c){
+        return '<div class="action-row" data-cat="'+c.id+'"><span class="cat-dot" style="background:'+colorHex(c.color)+'"></span><span class="a-title">'+esc(c.name)+'</span><button class="icon-btn" data-cat-del="'+c.id+'" aria-label="削除">✕</button></div>';
+      }).join("") : '<div class="empty">まだカテゴリがありません。</div>') +
+    '</div></details>';
+  }
+
+  function renderTodayRecord(){
+    var cats = state.categories || [];
+    var timer = state.timer || {};
+    var running = !!timer.categoryId;
+    var todaySessions = (state.timeSessions||[]).filter(function(s){ return s.date===todayStr(); }).sort(function(a,b){ return (a.createdAt||"") < (b.createdAt||"") ? 1 : -1; });
+    var todayTotal = sumMinutes(todaySessions);
+    var scheduleToday = (state.schedule||[]).filter(function(s){ return s.date===todayStr(); }).sort(function(a,b){ return a.startMin-b.startMin; });
+
+    var catChips = cats.map(function(c){
+      return '<button type="button" class="chip" data-timer-start="'+c.id+'"><span class="cat-dot" style="background:'+colorHex(c.color)+'"></span>'+esc(c.name)+'</button>';
+    }).join("");
+
+    var timerBlock = '<div class="card"><h3>タイマー</h3>' +
+      '<p class="section-lead" style="margin-bottom:.6em">今日の合計: '+minToHM(todayTotal)+'</p>' +
+      (running ?
+        ('<div class="col"><div class="stat"><div class="num" id="timer-elapsed" data-started="'+esc(timer.startedAt)+'">'+elapsedStr(timer.startedAt)+'</div>' +
+          '<div class="lbl">'+esc((catById(timer.categoryId)||{}).name||"削除済みカテゴリ")+'を計測中</div></div>' +
+          '<div class="row"><button class="btn btn-primary" id="timer-stop">停止して記録</button><button class="btn btn-ghost" id="timer-discard">破棄</button></div></div>')
+        : (cats.length ?
+          ('<div class="row">'+catChips+'</div><p style="font-size:.76rem;color:var(--ink-faint);margin:.5em 0 0">カテゴリをタップすると計測が始まります。</p>')
+          : '<p style="font-size:.85rem;margin:0">まずは下の「カテゴリを管理」からカテゴリを追加してください。</p>')
+      ) + '</div>';
+
+    var catOptions = cats.map(function(c){ return '<option value="'+c.id+'">'+esc(c.name)+'</option>'; }).join("");
+
+    var manualBlock = '<div class="card"><h3>手動で記録する</h3><div class="col">' +
+      '<div><label class="field-label">カテゴリ</label><select class="input" id="m-cat"'+(cats.length?"":" disabled")+'>'+(cats.length?catOptions:'<option>カテゴリ未登録</option>')+'</select></div>' +
+      '<div class="row">' +
+        '<div style="flex:1;min-width:8rem"><label class="field-label">日付</label><input class="input" type="date" id="m-date" value="'+todayStr()+'"></div>' +
+        '<div style="flex:1;min-width:8rem"><label class="field-label">時間（分）</label><input class="input" type="number" min="1" id="m-min" placeholder="例：30"></div>' +
+      '</div>' +
+      '<button class="btn btn-ghost" id="m-submit"'+(cats.length?"":" disabled")+'>記録を追加</button>' +
+    '</div></div>';
+
+    var scheduleBlock = '<div class="card"><h3>今日の予定</h3><div class="col">' +
+      '<div class="row">' +
+        '<input class="input" type="time" id="s-start" style="flex:1;min-width:6rem">' +
+        '<input class="input" type="time" id="s-end" style="flex:1;min-width:6rem">' +
+        '<select class="input" id="s-cat" style="flex:1;min-width:8rem"'+(cats.length?"":" disabled")+'>'+(cats.length?catOptions:'<option>カテゴリ未登録</option>')+'</select>' +
+      '</div>' +
+      '<input class="input" id="s-title" placeholder="内容（任意・空欄はカテゴリ名を使用）">' +
+      '<button class="btn btn-ghost" id="s-submit"'+(cats.length?"":" disabled")+'>予定を追加</button>' +
+    '</div>' +
+      (scheduleToday.length ? scheduleToday.map(function(s){
+        var c = catById(s.categoryId);
+        return '<div class="action-row'+(s.done?" done":"")+'" data-sched="'+s.id+'">' +
+          '<span class="cat-dot" style="background:'+colorHex(c?c.color:"slate")+'"></span>' +
+          '<span class="a-title">'+minToTimeStr(s.startMin)+'–'+minToTimeStr(s.endMin)+' '+esc(s.title || (c?c.name:"削除済みカテゴリ"))+'</span>' +
+          '<input type="checkbox" data-sched-done="'+s.id+'"'+(s.done?" checked":"")+'>' +
+          '<button class="icon-btn" data-sched-del="'+s.id+'" aria-label="削除">✕</button></div>';
+      }).join("") : '<div class="empty">今日の予定はまだありません。</div>') +
+    '</div>';
+
+    var logBlock = '<div class="card"><h3>今日の記録一覧</h3>' +
+      (todaySessions.length ? todaySessions.map(function(s){
+        var c = catById(s.categoryId);
+        return '<div class="entry"><div class="entry-head">' +
+          '<span class="entry-date"><span class="cat-dot" style="background:'+colorHex(c?c.color:"slate")+'"></span>'+esc(c?c.name:"削除済みカテゴリ")+'</span>' +
+          '<span class="entry-scores">'+minToHM(s.durationMin)+'</span></div>' +
+          '<button class="icon-btn" data-session-del="'+s.id+'" aria-label="削除">✕</button></div>';
+      }).join("") : '<div class="empty">今日はまだ記録がありません。</div>') +
+    '</div>';
+
+    return timerBlock + manualBlock + scheduleBlock + logBlock + renderCategoryManager();
+  }
+
+  function renderAnalytics(){
+    var sessions = state.timeSessions || [];
+    var allTotal = sumMinutes(sessions);
+    var st = timeStreak();
+    var period = analyticsPeriod;
+    var cur = rangeStrs(period, "current"), prev = rangeStrs(period, "prev");
+    var curTotal = sumInRange(sessions, cur.startStr, cur.endStr);
+    var prevTotal = sumInRange(sessions, prev.startStr, prev.endStr);
+    var catAgg = aggregateCategories(sessions, cur.startStr, cur.endStr);
+    var catAggPrev = aggregateCategories(sessions, prev.startStr, prev.endStr);
+
+    var legend = catAgg.length ? catAgg.map(function(c){
+      return '<div class="row" style="justify-content:space-between;font-size:.82rem;gap:.4rem"><span><span class="cat-dot" style="background:'+colorHex(c.color)+'"></span>'+esc(c.name)+'</span><span style="color:var(--ink-faint)">'+(curTotal?Math.round(c.minutes/curTotal*100):0)+'%</span></div>';
+    }).join("") : '';
+
+    var catRows = catAgg.length ? catAgg.map(function(c){
+      var prevMin = (catAggPrev.filter(function(p){ return p.id===c.id; })[0] || { minutes:0 }).minutes;
+      return '<div class="entry"><div class="entry-head">' +
+        '<span class="entry-date"><span class="cat-dot" style="background:'+colorHex(c.color)+'"></span>'+esc(c.name)+' <span style="color:var(--ink-faint)">'+c.count+'回</span></span>' +
+        '<span class="entry-scores">'+minToHM(c.minutes)+' '+(curTotal?Math.round(c.minutes/curTotal*100):0)+'%</span></div>' +
+        '<div style="text-align:right">'+pctChangeSpan(c.minutes, prevMin)+'</div></div>';
+    }).join("") : '<div class="empty">この期間の記録はまだありません。</div>';
+
+    return '<div class="grid-2">' +
+        '<div class="card stat"><div class="num">'+minToHM(allTotal)+'</div><div class="lbl">累計時間</div></div>' +
+        '<div class="card stat"><div class="num">'+st+'<span style="font-size:.9rem">日</span></div><div class="lbl">ストリーク</div></div>' +
+      '</div>' +
+      '<div class="card">' +
+        '<div class="row" style="justify-content:space-between;align-items:center">' +
+          '<div class="row">'+["1W","1M","1Y"].map(function(p){ return '<button type="button" class="chip" data-period="'+p+'" aria-pressed="'+(p===period)+'">'+p+'</button>'; }).join("")+'</div>' +
+          pctChangePill(curTotal, prevTotal) +
+        '</div>' +
+        '<div class="row" style="justify-content:space-between;margin-top:.9rem">' +
+          '<div class="col" style="gap:.1rem"><span class="range-total">'+minToHM(prevTotal)+'</span><span class="range-label">'+shortRangeLabel(prev.startStr, prev.endStr)+'</span></div>' +
+          '<div class="col" style="gap:.1rem;align-items:flex-end"><span class="range-total" style="color:var(--accent-strong)">'+minToHM(curTotal)+'</span><span class="range-label">'+shortRangeLabel(cur.startStr, cur.endStr)+'</span></div>' +
+        '</div>' +
+        timeBarChart(period, sessions) +
+      '</div>' +
+      '<div class="card"><h3>カテゴリ</h3>' +
+        (catAgg.length ?
+          '<div class="row" style="align-items:center;gap:1.2rem;flex-wrap:nowrap"><div style="flex-shrink:0">'+donutChart(catAgg, curTotal)+'</div><div class="col" style="flex:1;gap:.45rem">'+legend+'</div></div>'
+          : '<p style="font-size:.85rem;margin:0">この期間の記録はまだありません。</p>') +
+      '</div>' +
+      catRows;
+  }
+
+  function renderGoals(){
+    return '<h2 class="section-title">目標</h2>' +
+      '<div class="row" style="margin-bottom:.3rem">' +
+        [["goals","目標"],["today","今日の記録"],["analytics","分析"]].map(function(t){
+          return '<button type="button" class="chip" data-goals-sub="'+t[0]+'" aria-pressed="'+(goalsSubTab===t[0])+'">'+t[1]+'</button>';
+        }).join("") +
+      '</div>' +
+      (goalsSubTab==="today" ? renderTodayRecord() : goalsSubTab==="analytics" ? renderAnalytics() : renderGoalsList());
   }
 
   function buildSummary(){
@@ -524,6 +801,19 @@
         lines.push("  最新の達成度: "+(latest!==null ? latest+"/10" : "未記録")+(g.checkins&&g.checkins.length>1 ? "（記録"+g.checkins.length+"回・推移あり）" : ""));
       });
     } else lines.push("（登録なし）");
+    lines.push("");
+    lines.push("【努力量トラッキング（直近30日・カテゴリ別の合計時間）】");
+    var cutoff = fmtISO(new Date(Date.now()-30*86400000));
+    var recentSessions = (state.timeSessions||[]).filter(function(s){ return s.date >= cutoff; });
+    if(recentSessions.length){
+      var agg = {};
+      recentSessions.forEach(function(s){ agg[s.categoryId] = (agg[s.categoryId]||0) + s.durationMin; });
+      Object.keys(agg).sort(function(a,b){ return agg[b]-agg[a]; }).forEach(function(k){
+        var c = catById(k);
+        lines.push("・"+(c?c.name:"削除済みカテゴリ")+"："+minToHM(agg[k]));
+      });
+      lines.push("記録のストリーク（連続日数）："+timeStreak()+"日");
+    } else lines.push("（記録なし）");
     return lines.join("\n");
   }
 
@@ -759,6 +1049,97 @@
       }
     });
     scrollChatToBottom(app);
+
+    /* ---------- effort tracking events ---------- */
+    app.querySelectorAll("[data-goals-sub]").forEach(function(b){
+      b.addEventListener("click", function(){ goalsSubTab = b.getAttribute("data-goals-sub"); sessionStorage.setItem("sc_goals_sub", goalsSubTab); render(); });
+    });
+    app.querySelectorAll("[data-period]").forEach(function(b){
+      b.addEventListener("click", function(){ analyticsPeriod = b.getAttribute("data-period"); sessionStorage.setItem("sc_ap", analyticsPeriod); render(); });
+    });
+    app.querySelectorAll(".color-chip").forEach(function(chip){
+      chip.addEventListener("click", function(){
+        app.querySelectorAll(".color-chip").forEach(function(c2){ c2.setAttribute("aria-pressed","false"); });
+        chip.setAttribute("aria-pressed","true");
+      });
+    });
+    var cSubmit = app.querySelector("#c-submit");
+    if(cSubmit) cSubmit.addEventListener("click", function(){
+      var nameEl = app.querySelector("#c-name"); var name = nameEl.value.trim(); if(!name) return;
+      var colorChip = app.querySelector('.color-chip[aria-pressed="true"]');
+      var color = colorChip ? colorChip.getAttribute("data-color") : CATEGORY_COLORS[0].id;
+      persist(function(next){ next.categories = (next.categories||[]).concat([{ id:uid(), name:name, color:color, createdAt:new Date().toISOString() }]); });
+    });
+    app.querySelectorAll("[data-cat-del]").forEach(function(btn){
+      btn.addEventListener("click", function(){
+        var id = btn.getAttribute("data-cat-del");
+        persist(function(next){ next.categories = (next.categories||[]).filter(function(c){ return c.id!==id; }); });
+      });
+    });
+    app.querySelectorAll("[data-timer-start]").forEach(function(btn){
+      btn.addEventListener("click", function(){
+        var id = btn.getAttribute("data-timer-start");
+        persist(function(next){ next.timer = { categoryId:id, startedAt:new Date().toISOString() }; });
+      });
+    });
+    var timerStop = app.querySelector("#timer-stop");
+    if(timerStop) timerStop.addEventListener("click", function(){
+      persist(function(next){
+        var t = next.timer || {};
+        if(t.startedAt){
+          var mins = Math.max(1, Math.round((Date.now() - new Date(t.startedAt).getTime())/60000));
+          next.timeSessions = (next.timeSessions||[]).concat([{ id:uid(), categoryId:t.categoryId, date:todayStr(), durationMin:mins, source:"timer", createdAt:new Date().toISOString() }]);
+        }
+        next.timer = { categoryId:null, startedAt:null };
+      });
+    });
+    var timerDiscard = app.querySelector("#timer-discard");
+    if(timerDiscard) timerDiscard.addEventListener("click", function(){
+      persist(function(next){ next.timer = { categoryId:null, startedAt:null }; });
+    });
+    var mSubmit = app.querySelector("#m-submit");
+    if(mSubmit) mSubmit.addEventListener("click", function(){
+      var catSel = app.querySelector("#m-cat"); if(!catSel || !catSel.value) return;
+      var date = app.querySelector("#m-date").value || todayStr();
+      var min = parseInt(app.querySelector("#m-min").value, 10);
+      if(!min || min<1) return;
+      persist(function(next){ next.timeSessions = (next.timeSessions||[]).concat([{ id:uid(), categoryId:catSel.value, date:date, durationMin:min, source:"manual", createdAt:new Date().toISOString() }]); });
+    });
+    app.querySelectorAll("[data-session-del]").forEach(function(btn){
+      btn.addEventListener("click", function(){
+        var id = btn.getAttribute("data-session-del");
+        persist(function(next){ next.timeSessions = (next.timeSessions||[]).filter(function(s){ return s.id!==id; }); });
+      });
+    });
+    var sSubmit = app.querySelector("#s-submit");
+    if(sSubmit) sSubmit.addEventListener("click", function(){
+      var startEl = app.querySelector("#s-start"), endEl = app.querySelector("#s-end"), catEl = app.querySelector("#s-cat"), titleEl = app.querySelector("#s-title");
+      if(!startEl.value || !endEl.value || !catEl.value) return;
+      var sm = timeStrToMin(startEl.value), em = timeStrToMin(endEl.value);
+      if(em<=sm) return;
+      persist(function(next){ next.schedule = (next.schedule||[]).concat([{ id:uid(), date:todayStr(), categoryId:catEl.value, startMin:sm, endMin:em, title:titleEl.value.trim(), done:false }]); });
+    });
+    app.querySelectorAll("[data-sched-done]").forEach(function(cb){
+      cb.addEventListener("change", function(){
+        var id = cb.getAttribute("data-sched-done");
+        persist(function(next){ (next.schedule||[]).forEach(function(s){ if(s.id===id) s.done = cb.checked; }); });
+      });
+    });
+    app.querySelectorAll("[data-sched-del]").forEach(function(btn){
+      btn.addEventListener("click", function(){
+        var id = btn.getAttribute("data-sched-del");
+        persist(function(next){ next.schedule = (next.schedule||[]).filter(function(s){ return s.id!==id; }); });
+      });
+    });
+
+    if(timerTickInterval){ clearInterval(timerTickInterval); timerTickInterval = null; }
+    if(state.timer && state.timer.categoryId && tab==="goals" && goalsSubTab==="today"){
+      timerTickInterval = setInterval(function(){
+        var e = document.getElementById("timer-elapsed");
+        if(!e){ clearInterval(timerTickInterval); timerTickInterval = null; return; }
+        e.textContent = elapsedStr(e.getAttribute("data-started"));
+      }, 1000);
+    }
   }
 
   function boot(){
