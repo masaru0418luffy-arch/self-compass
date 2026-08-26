@@ -149,6 +149,15 @@
   .banner{ font-size:.8rem; padding:.7em 1em; border-radius:var(--radius-s); background:var(--clay-soft); color:var(--clay); border:1px solid var(--clay); }
   .banner.ok{ background:var(--accent-soft); color:var(--accent-strong); border-color:var(--accent); }
 
+  .chat-log{ display:flex; flex-direction:column; gap:.6rem; max-height:26rem; overflow-y:auto; }
+  .chat-msg{ display:flex; }
+  .chat-msg.chat-user{ justify-content:flex-end; }
+  .chat-msg.chat-assistant{ justify-content:flex-start; }
+  .chat-bubble{ max-width:82%; padding:.65em .9em; border-radius:var(--radius-m); font-size:.9rem; white-space:pre-wrap; line-height:1.6; }
+  .chat-user .chat-bubble{ background:var(--accent); color:var(--accent-ink); border-bottom-right-radius:4px; }
+  .chat-assistant .chat-bubble{ background:var(--surface-2); color:var(--ink); border-bottom-left-radius:4px; }
+  .chat-thinking{ color:var(--ink-faint); font-style:italic; }
+
   .chart-wrap{ overflow-x:auto; }
   .quote-mark{ font-family:var(--font-head); color:var(--gold); font-size:1.1rem; }
   .summary-box{ white-space:pre-wrap; font-size:.82rem; max-height:15rem; overflow-y:auto; background:var(--bg); border:1px solid var(--border); border-radius:var(--radius-s); padding:.9rem; color:var(--ink-soft); }
@@ -193,6 +202,13 @@
   };
 
   var CONFIG_READY = firebaseConfig.apiKey.indexOf("YOUR_") !== 0;
+
+  /* AIカウンセラー機能のバックエンド（Cloudflare Workers）のURL。
+     セットアップ後にこの値を実際のWorker URLに置き換えます。 */
+  var WORKER_URL = "https://self-compass-counselor.masaru0418luffy.workers.dev";
+  var CHAT_READY = WORKER_URL.indexOf("YOUR_") === -1;
+  var chatPending = false;
+  var chatError = "";
 
   var JOURNAL_TAGS = ["仕事","将来への不安","人間関係","体調","小さな気づき","挑戦","休息"];
 
@@ -264,7 +280,7 @@
     chat:'<svg viewBox="0 0 24 24"><path d="M4 5.5h16v10H9.5L5.5 19v-3.5H4z"/></svg>'
   };
 
-  var DEFAULT_STATE = { meta:{ updatedAt:null }, intake:{}, journal:[], insights:[], actions:[], goals:[] };
+  var DEFAULT_STATE = { meta:{ updatedAt:null }, intake:{}, journal:[], insights:[], actions:[], goals:[], chatHistory:[] };
   var state = JSON.parse(JSON.stringify(DEFAULT_STATE));
   var tab = sessionStorage.getItem("sc_tab") || "home";
   var authMode = "login";
@@ -307,7 +323,7 @@
       if(snap.exists){
         var data = snap.data();
         state = Object.assign({}, DEFAULT_STATE, data, {
-          intake: data.intake || {}, journal: data.journal || [], insights: data.insights || [], actions: data.actions || [], goals: data.goals || []
+          intake: data.intake || {}, journal: data.journal || [], insights: data.insights || [], actions: data.actions || [], goals: data.goals || [], chatHistory: data.chatHistory || []
         });
       } else {
         docRef().set(state);
@@ -510,14 +526,67 @@
     return lines.join("\n");
   }
 
-  function renderConsult(){
-    return '<h2 class="section-title">Claudeに相談</h2>' +
-      '<p class="section-lead">このアプリ自体はデータの保管庫です。実際の対話やアドバイスは、下のサマリーをClaudeとの会話に貼り付けて始めてください。</p>' +
-      '<div class="card"><h3>使い方</h3><p style="font-size:.88rem">① 下のボタンでサマリーを作成 → ② コピー → ③ Claudeとの会話に貼り付けて相談を始める。</p></div>' +
-      '<button class="btn btn-primary btn-block" id="c-build">相談用サマリーを作成</button>' +
-      '<div class="card" id="c-result" hidden><h3>サマリー</h3><div class="summary-box" id="c-text"></div>' +
-        '<div class="row" style="margin-top:.8rem"><button class="btn btn-ghost" id="c-copy">コピーする</button><span id="c-copy-msg" style="font-size:.78rem;color:var(--ink-faint)"></span></div></div>' +
-      '<div class="card"><h3>データの保管について</h3><p style="font-size:.82rem">この記録はあなたのFirebaseアカウントに保存されています。Claude側には自動送信されません。相談したいときだけ、このサマリーを自分でコピーして渡してください。</p></div>';
+  function buildCounselorSystem(){
+    return "あなたは資格を持つ一流のキャリア・メンタルカウンセラーです。話し相手は「マサル」さんです。" +
+      "以下は、マサルさんがこれまでに記録してきた自己分析プロフィールと最近の記録です。これを踏まえて、共感的かつ実践的に、マサルさん専用の視点で会話してください。" +
+      "一方的に助言するのではなく、対話の中で時には質問を返しながら、一緒に考える姿勢で応じてください。深刻な症状や医療的な判断が必要な内容には、専門家への相談も選択肢として添えてください。\n\n" +
+      buildSummary();
+  }
+
+  function scrollChatToBottom(app){
+    var log = app.querySelector("#chat-log");
+    if(log) log.scrollTop = log.scrollHeight;
+  }
+
+  function sendChatMessage(text){
+    var history = (state.chatHistory||[]).map(function(m){ return { role:m.role, content:m.content }; });
+    var messages = history.concat([{ role:"user", content:text }]);
+    persist(function(next){ next.chatHistory = (next.chatHistory||[]).concat([{ role:"user", content:text, ts:new Date().toISOString() }]); });
+    chatPending = true; chatError = ""; render();
+    fetch(WORKER_URL, {
+      method:"POST",
+      headers:{ "content-type":"application/json" },
+      body: JSON.stringify({ system: buildCounselorSystem(), messages: messages })
+    }).then(function(r){
+      return r.json().then(function(data){ return { ok:r.ok, data:data }; });
+    }).then(function(res){
+      chatPending = false;
+      if(!res.ok || !res.data || res.data.error || !res.data.text){
+        chatError = "応答の取得に失敗しました。しばらくしてからもう一度お試しください。";
+        render();
+        return;
+      }
+      persist(function(next){ next.chatHistory = (next.chatHistory||[]).concat([{ role:"assistant", content:res.data.text, ts:new Date().toISOString() }]); });
+    }).catch(function(err){
+      console.error(err);
+      chatPending = false;
+      chatError = "通信エラーが発生しました。ネットワークをご確認のうえ、もう一度お試しください。";
+      render();
+    });
+  }
+
+  function renderChat(){
+    if(!CHAT_READY){
+      return '<h2 class="section-title">AIカウンセラー</h2>' +
+        '<p class="section-lead">もう少しで使えるようになります。バックエンドの設定が完了すると、ここでこれまでの記録を踏まえた会話ができるようになります。</p>';
+    }
+    var msgs = state.chatHistory || [];
+    return '<h2 class="section-title">AIカウンセラー</h2>' +
+      '<p class="section-lead">自己分析・記録・目標など、これまでの情報を踏まえてマサルさん専用の視点で会話します。</p>' +
+      '<div class="card chat-log" id="chat-log">' +
+        (msgs.length ? msgs.map(function(m){
+          return '<div class="chat-msg chat-'+m.role+'"><div class="chat-bubble">'+esc(m.content)+'</div></div>';
+        }).join("") : '<div class="empty">まだ会話がありません。今気になっていることを書いてみてください。</div>') +
+        (chatPending ? '<div class="chat-msg chat-assistant"><div class="chat-bubble chat-thinking">考えています…</div></div>' : "") +
+      '</div>' +
+      (chatError ? '<div class="banner">'+esc(chatError)+'</div>' : "") +
+      '<div class="card"><div class="col">' +
+        '<textarea id="chat-input" placeholder="今の気持ちや相談したいことを書いてください（Enterで送信、Shift+Enterで改行）"></textarea>' +
+        '<button class="btn btn-primary" id="chat-send"'+(chatPending?" disabled":"")+'>送信する</button>' +
+      '</div></div>' +
+      '<details class="accordion"><summary><span class="s-title">送信される情報を確認する</span></summary>' +
+        '<div class="s-body"><p style="font-size:.8rem;margin:0">毎回のメッセージと一緒に、これまでの自己分析・記録・目標のサマリーがAIに送られます。内容は以下の通りです。</p>' +
+        '<div class="summary-box">'+esc(buildSummary())+'</div></div></details>';
   }
 
   var TABS = [
@@ -526,7 +595,7 @@
     {id:"record", label:"記録", icon:"pencil", render:renderRecord},
     {id:"actions", label:"アクション", icon:"check", render:renderActions},
     {id:"goals", label:"目標", icon:"target", render:renderGoals},
-    {id:"consult", label:"相談", icon:"chat", render:renderConsult}
+    {id:"consult", label:"AIカウンセラー", icon:"chat", render:renderChat}
   ];
 
   function renderAuth(){
@@ -664,19 +733,18 @@
         persist(function(next){ next.goals = next.goals.filter(function(g){ return g.id!==id; }); });
       });
     });
-    var cBuild = app.querySelector("#c-build");
-    if(cBuild) cBuild.addEventListener("click", function(){
-      var text = buildSummary();
-      app.querySelector("#c-text").textContent = text;
-      app.querySelector("#c-result").hidden = false;
-      var cCopy = app.querySelector("#c-copy");
-      cCopy.onclick = function(){
-        var msg = app.querySelector("#c-copy-msg");
-        if(navigator.clipboard && navigator.clipboard.writeText){
-          navigator.clipboard.writeText(text).then(function(){ msg.textContent = "コピーしました"; }).catch(function(){ msg.textContent = "コピーできませんでした。上のテキストを選択してコピーしてください。"; });
-        } else { msg.textContent = "上のテキストを選択してコピーしてください。"; }
-      };
+    var chatSend = app.querySelector("#chat-send");
+    var chatInput = app.querySelector("#chat-input");
+    if(chatSend) chatSend.addEventListener("click", function(){
+      if(chatPending) return;
+      var text = chatInput.value.trim(); if(!text) return;
+      chatInput.value = "";
+      sendChatMessage(text);
     });
+    if(chatInput) chatInput.addEventListener("keydown", function(e){
+      if(e.key === "Enter" && !e.shiftKey){ e.preventDefault(); if(chatSend) chatSend.click(); }
+    });
+    scrollChatToBottom(app);
   }
 
   function boot(){
