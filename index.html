@@ -225,6 +225,12 @@
   var goalsSubTab = sessionStorage.getItem("sc_goals_sub") || "goals";
   var analyticsPeriod = sessionStorage.getItem("sc_ap") || "1W";
   var timerTickInterval = null;
+  var sessionPickerHours = 0;
+  var sessionPickerMinutes = 30;
+  var sessionPickerCategoryId = null;
+  var audioCtx = null;
+  var alarmPlaying = false;
+  var alarmBeepInterval = null;
 
   var CATEGORY_COLORS = [
     { id:"lime", hex:"#9FD356" },
@@ -307,7 +313,7 @@
     chat:'<svg viewBox="0 0 24 24"><path d="M4 5.5h16v10H9.5L5.5 19v-3.5H4z"/></svg>'
   };
 
-  var DEFAULT_STATE = { meta:{ updatedAt:null }, intake:{}, journal:[], insights:[], actions:[], goals:[], chatHistory:[], categories:[], timeSessions:[], schedule:[], timer:{ categoryId:null, startedAt:null } };
+  var DEFAULT_STATE = { meta:{ updatedAt:null }, intake:{}, journal:[], insights:[], actions:[], goals:[], chatHistory:[], categories:[], timeSessions:[], schedule:[], timer:{ categoryId:null, startedAt:null, durationMin:null } };
   var state = JSON.parse(JSON.stringify(DEFAULT_STATE));
   var tab = sessionStorage.getItem("sc_tab") || "home";
   var authMode = "login";
@@ -341,6 +347,51 @@
     var totalSec = Math.floor(ms/1000);
     var h=Math.floor(totalSec/3600), m=Math.floor((totalSec%3600)/60), s=totalSec%60;
     return String(h).padStart(2,"0")+":"+String(m).padStart(2,"0")+":"+String(s).padStart(2,"0");
+  }
+  function remainingSec(startedAtISO, durationMin){
+    var elapsed = Math.floor((Date.now()-new Date(startedAtISO).getTime())/1000);
+    return (durationMin*60) - elapsed;
+  }
+  function countdownStr(startedAtISO, durationMin){
+    var r = remainingSec(startedAtISO, durationMin); if(r<0) r=0;
+    var m=Math.floor(r/60), s=r%60;
+    return String(m).padStart(2,"0")+":"+String(s).padStart(2,"0");
+  }
+  function ensureAudioCtx(){
+    try{
+      if(!audioCtx) audioCtx = new (window.AudioContext||window.webkitAudioContext)();
+      if(audioCtx.state === "suspended") audioCtx.resume();
+    }catch(e){ console.error(e); }
+  }
+  function beepOnce(){
+    try{
+      if(!audioCtx) return;
+      var o = audioCtx.createOscillator(), g = audioCtx.createGain();
+      o.type = "sine"; o.frequency.value = 880;
+      g.gain.setValueAtTime(0.0001, audioCtx.currentTime);
+      g.gain.exponentialRampToValueAtTime(0.3, audioCtx.currentTime+0.01);
+      g.gain.exponentialRampToValueAtTime(0.0001, audioCtx.currentTime+0.4);
+      o.connect(g); g.connect(audioCtx.destination);
+      o.start(); o.stop(audioCtx.currentTime+0.4);
+    }catch(e){ console.error(e); }
+  }
+  function startAlarm(){
+    if(alarmPlaying) return;
+    alarmPlaying = true;
+    ensureAudioCtx();
+    beepOnce();
+    alarmBeepInterval = setInterval(beepOnce, 700);
+    if(navigator.vibrate){ try{ navigator.vibrate([300,150,300,150,300]); }catch(e){} }
+  }
+  function stopAlarm(){
+    if(!alarmPlaying) return;
+    alarmPlaying = false;
+    if(alarmBeepInterval){ clearInterval(alarmBeepInterval); alarmBeepInterval = null; }
+  }
+  function alarmTick(){
+    var t = state.timer;
+    if(!t || !t.categoryId || !t.durationMin || !t.startedAt){ stopAlarm(); return; }
+    if(remainingSec(t.startedAt, t.durationMin) <= 0) startAlarm(); else stopAlarm();
   }
 
   function rangeStrs(period, which){
@@ -467,7 +518,7 @@
         var data = snap.data();
         state = Object.assign({}, DEFAULT_STATE, data, {
           intake: data.intake || {}, journal: data.journal || [], insights: data.insights || [], actions: data.actions || [], goals: data.goals || [], chatHistory: data.chatHistory || [],
-          categories: data.categories || [], timeSessions: data.timeSessions || [], schedule: data.schedule || [], timer: data.timer || { categoryId:null, startedAt:null }
+          categories: data.categories || [], timeSessions: data.timeSessions || [], schedule: data.schedule || [], timer: data.timer || { categoryId:null, startedAt:null, durationMin:null }
         });
       } else {
         docRef().set(state);
@@ -650,22 +701,38 @@
     var todayTotal = sumMinutes(todaySessions);
     var scheduleToday = (state.schedule||[]).filter(function(s){ return s.date===todayStr(); }).sort(function(a,b){ return a.startMin-b.startMin; });
 
-    var catChips = cats.map(function(c){
-      return '<button type="button" class="chip" data-timer-start="'+c.id+'"><span class="cat-dot" style="background:'+colorHex(c.color)+'"></span>'+esc(c.name)+'</button>';
-    }).join("");
-
-    var timerBlock = '<div class="card"><h3>タイマー</h3>' +
-      '<p class="section-lead" style="margin-bottom:.6em">今日の合計: '+minToHM(todayTotal)+'</p>' +
-      (running ?
-        ('<div class="col"><div class="stat"><div class="num" id="timer-elapsed" data-started="'+esc(timer.startedAt)+'">'+elapsedStr(timer.startedAt)+'</div>' +
-          '<div class="lbl">'+esc((catById(timer.categoryId)||{}).name||"削除済みカテゴリ")+'を計測中</div></div>' +
-          '<div class="row"><button class="btn btn-primary" id="timer-stop">停止して記録</button><button class="btn btn-ghost" id="timer-discard">破棄</button></div></div>')
-        : (cats.length ?
-          ('<div class="row">'+catChips+'</div><p style="font-size:.76rem;color:var(--ink-faint);margin:.5em 0 0">カテゴリをタップすると計測が始まります。</p>')
-          : '<p style="font-size:.85rem;margin:0">まずは下の「カテゴリを管理」からカテゴリを追加してください。</p>')
-      ) + '</div>';
-
     var catOptions = cats.map(function(c){ return '<option value="'+c.id+'">'+esc(c.name)+'</option>'; }).join("");
+
+    var timerBlock;
+    if(running){
+      var remainSecNow = timer.durationMin*60 - Math.floor((Date.now()-new Date(timer.startedAt).getTime())/1000);
+      var isRinging = remainSecNow<=0;
+      var runningCat = catById(timer.categoryId);
+      timerBlock = '<div class="card"><h3>タイマー</h3>' +
+        '<p class="section-lead" style="margin-bottom:.6em">今日の合計: '+minToHM(todayTotal)+'</p>' +
+        '<div class="col"><div class="stat"><div class="num" id="timer-countdown" data-started="'+esc(timer.startedAt)+'" data-duration="'+timer.durationMin+'">'+countdownStr(timer.startedAt,timer.durationMin)+'</div>' +
+          '<div class="lbl">'+esc(runningCat?runningCat.name:"削除済みカテゴリ")+'（'+minToHM(timer.durationMin)+'）を計測中</div></div>' +
+          '<div class="row"><button class="btn '+(isRinging?"btn-primary":"btn-ghost")+'" id="timer-finish">'+(isRinging?"完了":"セッションを終了")+'</button>' +
+          '<button class="btn btn-ghost" id="timer-discard">破棄</button></div></div>' +
+      '</div>';
+    } else if(cats.length){
+      var pickCat = cats.filter(function(c){ return c.id===sessionPickerCategoryId; })[0] ? sessionPickerCategoryId : cats[0].id;
+      var hourOpts = [0,1,2,3].map(function(h){ return '<option value="'+h+'"'+(h===sessionPickerHours?" selected":"")+'>'+h+'時間</option>'; }).join("");
+      var minOpts = [0,5,10,15,20,25,30,35,40,45,50,55].map(function(m){ return '<option value="'+m+'"'+(m===sessionPickerMinutes?" selected":"")+'>'+m+'分</option>'; }).join("");
+      var pickCatOptions = cats.map(function(c){ return '<option value="'+c.id+'"'+(c.id===pickCat?" selected":"")+'>'+esc(c.name)+'</option>'; }).join("");
+      timerBlock = '<div class="card" id="timer-picker-card"><h3>タイマー</h3>' +
+        '<p class="section-lead" style="margin-bottom:.6em">今日の合計: '+minToHM(todayTotal)+'</p>' +
+        '<div class="row" style="align-items:flex-end">' +
+          '<div><label class="field-label">時間</label><select class="input" id="timer-h">'+hourOpts+'</select></div>' +
+          '<div><label class="field-label">分</label><select class="input" id="timer-m">'+minOpts+'</select></div>' +
+        '</div>' +
+        '<div style="margin-top:.6rem"><label class="field-label">カテゴリ</label><select class="input" id="timer-cat">'+pickCatOptions+'</select></div>' +
+        '<button class="btn btn-primary btn-block" id="timer-start" style="margin-top:.8rem">セッションを開始</button>' +
+      '</div>';
+    } else {
+      timerBlock = '<div class="card"><h3>タイマー</h3>' +
+        '<p style="font-size:.85rem;margin:0">まずは下の「カテゴリを管理」からカテゴリを追加してください。</p></div>';
+    }
 
     var manualBlock = '<div class="card"><h3>手動で記録する</h3><div class="col">' +
       '<div><label class="field-label">カテゴリ</label><select class="input" id="m-cat"'+(cats.length?"":" disabled")+'>'+(cats.length?catOptions:'<option>カテゴリ未登録</option>')+'</select></div>' +
@@ -690,6 +757,7 @@
         return '<div class="action-row'+(s.done?" done":"")+'" data-sched="'+s.id+'">' +
           '<span class="cat-dot" style="background:'+colorHex(c?c.color:"slate")+'"></span>' +
           '<span class="a-title">'+minToTimeStr(s.startMin)+'–'+minToTimeStr(s.endMin)+' '+esc(s.title || (c?c.name:"削除済みカテゴリ"))+'</span>' +
+          '<button class="btn btn-ghost btn-small" data-sched-start="'+s.id+'">開始</button>' +
           '<input type="checkbox" data-sched-done="'+s.id+'"'+(s.done?" checked":"")+'>' +
           '<button class="icon-btn" data-sched-del="'+s.id+'" aria-label="削除">✕</button></div>';
       }).join("") : '<div class="empty">今日の予定はまだありません。</div>') +
@@ -1077,26 +1145,53 @@
         persist(function(next){ next.categories = (next.categories||[]).filter(function(c){ return c.id!==id; }); });
       });
     });
-    app.querySelectorAll("[data-timer-start]").forEach(function(btn){
+    var timerH = app.querySelector("#timer-h"), timerM = app.querySelector("#timer-m"), timerCatSel = app.querySelector("#timer-cat");
+    if(timerH) timerH.addEventListener("change", function(){ sessionPickerHours = parseInt(timerH.value,10)||0; });
+    if(timerM) timerM.addEventListener("change", function(){ sessionPickerMinutes = parseInt(timerM.value,10)||0; });
+    if(timerCatSel) timerCatSel.addEventListener("change", function(){ sessionPickerCategoryId = timerCatSel.value; });
+    var timerStart = app.querySelector("#timer-start");
+    if(timerStart) timerStart.addEventListener("click", function(){
+      var h = parseInt(app.querySelector("#timer-h").value,10)||0;
+      var m = parseInt(app.querySelector("#timer-m").value,10)||0;
+      var dur = h*60+m;
+      var catSel = app.querySelector("#timer-cat");
+      if(!catSel || !catSel.value || dur<=0) return;
+      sessionPickerHours = h; sessionPickerMinutes = m; sessionPickerCategoryId = catSel.value;
+      ensureAudioCtx();
+      persist(function(next){ next.timer = { categoryId:catSel.value, startedAt:new Date().toISOString(), durationMin:dur }; });
+    });
+    app.querySelectorAll("[data-sched-start]").forEach(function(btn){
       btn.addEventListener("click", function(){
-        var id = btn.getAttribute("data-timer-start");
-        persist(function(next){ next.timer = { categoryId:id, startedAt:new Date().toISOString() }; });
+        var id = btn.getAttribute("data-sched-start");
+        var s = (state.schedule||[]).filter(function(x){ return x.id===id; })[0];
+        if(!s) return;
+        var dur = Math.max(5, s.endMin - s.startMin);
+        sessionPickerHours = Math.floor(dur/60);
+        sessionPickerMinutes = dur%60;
+        sessionPickerCategoryId = s.categoryId;
+        render();
+        var card = document.getElementById("timer-picker-card");
+        if(card) card.scrollIntoView({ behavior:"smooth", block:"start" });
       });
     });
-    var timerStop = app.querySelector("#timer-stop");
-    if(timerStop) timerStop.addEventListener("click", function(){
+    var timerFinish = app.querySelector("#timer-finish");
+    if(timerFinish) timerFinish.addEventListener("click", function(){
+      stopAlarm();
       persist(function(next){
         var t = next.timer || {};
-        if(t.startedAt){
-          var mins = Math.max(1, Math.round((Date.now() - new Date(t.startedAt).getTime())/60000));
+        if(t.startedAt && t.durationMin){
+          var elapsedSec = Math.floor((Date.now() - new Date(t.startedAt).getTime())/1000);
+          var plannedSec = t.durationMin*60;
+          var mins = elapsedSec >= plannedSec ? t.durationMin : Math.max(1, Math.round(elapsedSec/60));
           next.timeSessions = (next.timeSessions||[]).concat([{ id:uid(), categoryId:t.categoryId, date:todayStr(), durationMin:mins, source:"timer", createdAt:new Date().toISOString() }]);
         }
-        next.timer = { categoryId:null, startedAt:null };
+        next.timer = { categoryId:null, startedAt:null, durationMin:null };
       });
     });
     var timerDiscard = app.querySelector("#timer-discard");
     if(timerDiscard) timerDiscard.addEventListener("click", function(){
-      persist(function(next){ next.timer = { categoryId:null, startedAt:null }; });
+      stopAlarm();
+      persist(function(next){ next.timer = { categoryId:null, startedAt:null, durationMin:null }; });
     });
     var mSubmit = app.querySelector("#m-submit");
     if(mSubmit) mSubmit.addEventListener("click", function(){
@@ -1136,9 +1231,20 @@
     if(timerTickInterval){ clearInterval(timerTickInterval); timerTickInterval = null; }
     if(state.timer && state.timer.categoryId && tab==="goals" && goalsSubTab==="today"){
       timerTickInterval = setInterval(function(){
-        var e = document.getElementById("timer-elapsed");
-        if(!e){ clearInterval(timerTickInterval); timerTickInterval = null; return; }
-        e.textContent = elapsedStr(e.getAttribute("data-started"));
+        var el = document.getElementById("timer-countdown");
+        if(!el){ clearInterval(timerTickInterval); timerTickInterval = null; return; }
+        var dur = parseFloat(el.getAttribute("data-duration"));
+        var started = el.getAttribute("data-started");
+        var r = remainingSec(started, dur);
+        var ringing = r <= 0;
+        if(r<0) r=0;
+        var m=Math.floor(r/60), s=r%60;
+        el.textContent = String(m).padStart(2,"0")+":"+String(s).padStart(2,"0");
+        var btn = document.getElementById("timer-finish");
+        if(btn){
+          if(ringing){ btn.textContent="完了"; btn.classList.remove("btn-ghost"); btn.classList.add("btn-primary"); }
+          else { btn.textContent="セッションを終了"; btn.classList.remove("btn-primary"); btn.classList.add("btn-ghost"); }
+        }
       }, 1000);
     }
   }
@@ -1159,6 +1265,7 @@
   }
 
   boot();
+  setInterval(alarmTick, 1000);
 })();
 </script>
 </body>
