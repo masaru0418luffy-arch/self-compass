@@ -209,6 +209,7 @@
   var CHAT_READY = WORKER_URL.indexOf("YOUR_") === -1;
   var chatPending = false;
   var chatError = "";
+  var chatEnterArmedAt = 0;
 
   var JOURNAL_TAGS = ["仕事","将来への不安","人間関係","体調","小さな気づき","挑戦","休息"];
 
@@ -581,7 +582,7 @@
       '</div>' +
       (chatError ? '<div class="banner">'+esc(chatError)+'</div>' : "") +
       '<div class="card"><div class="col">' +
-        '<textarea id="chat-input" placeholder="今の気持ちや相談したいことを書いてください（Enterで送信、Shift+Enterで改行）"></textarea>' +
+        '<textarea id="chat-input" placeholder="今の気持ちや相談したいことを書いてください（Enterを2回で送信、Shift+Enterで改行）"></textarea>' +
         '<button class="btn btn-primary" id="chat-send"'+(chatPending?" disabled":"")+'>送信する（ダブルクリック）</button>' +
       '</div></div>' +
       '<details class="accordion"><summary><span class="s-title">送信される情報を確認する</span></summary>' +
@@ -743,7 +744,19 @@
     }
     if(chatSend) chatSend.addEventListener("dblclick", doSendChat);
     if(chatInput) chatInput.addEventListener("keydown", function(e){
-      if(e.key === "Enter" && !e.shiftKey){ e.preventDefault(); doSendChat(); }
+      if(e.key === "Enter" && !e.shiftKey){
+        if(e.isComposing || e.keyCode === 229) return;
+        e.preventDefault();
+        var now = Date.now();
+        if(chatEnterArmedAt && (now - chatEnterArmedAt) < 800){
+          chatEnterArmedAt = 0;
+          doSendChat();
+        } else {
+          chatEnterArmedAt = now;
+        }
+      } else if(e.key !== "Shift") {
+        chatEnterArmedAt = 0;
+      }
     });
     scrollChatToBottom(app);
   }
