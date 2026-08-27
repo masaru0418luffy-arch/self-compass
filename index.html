@@ -329,6 +329,24 @@
   function fmtISO(d){ return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0"); }
   function avg(arr){ return arr.length ? (arr.reduce(function(a,b){return a+b;},0)/arr.length) : null; }
   function recentJournal(days){ var cutoff = Date.now() - days*86400000; return state.journal.filter(function(j){ return new Date(j.date+"T00:00:00").getTime() >= cutoff; }); }
+  function dayTensionObj(j){
+    if(j.tension) return j.tension;
+    if(typeof j.mood === "number" || typeof j.energy === "number"){
+      var v = (typeof j.mood === "number" && typeof j.energy === "number") ? Math.round((j.mood+j.energy)/2) : (j.mood!=null ? j.mood : j.energy);
+      return { morning:null, noon:v, night:null };
+    }
+    return { morning:null, noon:null, night:null };
+  }
+  function dayAvgTension(j){
+    var t = dayTensionObj(j);
+    var vals = [t.morning,t.noon,t.night].filter(function(v){ return typeof v === "number"; });
+    return vals.length ? (vals.reduce(function(a,b){return a+b;},0)/vals.length) : null;
+  }
+  function tensionSummaryText(j){
+    var t = dayTensionObj(j);
+    function f(v){ return v==null ? "—" : v; }
+    return "朝 "+f(t.morning)+" ・ 昼 "+f(t.noon)+" ・ 夜 "+f(t.night);
+  }
 
   function intakeAnswered(){ var n=0; INTAKE_SECTIONS.forEach(function(sec){ var a=state.intake[sec.id]||{}; sec.questions.forEach(function(q){ if(a[q.id] && a[q.id].trim()) n++; }); }); return n; }
   function sectionAnswered(sec){ var a = state.intake[sec.id] || {}; return sec.questions.filter(function(q){ return a[q.id] && a[q.id].trim(); }).length; }
@@ -529,7 +547,7 @@
 
   /* ---------- render helpers ---------- */
   function sparkline(entries, unitLabel){
-    unitLabel = unitLabel || "気分";
+    unitLabel = unitLabel || "テンション";
     if(!entries.length) return '<p style="font-size:.82rem">まだ記録がありません。</p>';
     var w=300,h=64,pad=4,n=entries.length,bw=(w-pad*2)/n;
     var bars = entries.map(function(e,i){
@@ -550,8 +568,9 @@
   function renderHome(){
     var pct = Math.round((intakeAnswered()/TOTAL_QUESTIONS)*100);
     var st = streak();
-    var recent = recentJournal(14).slice().sort(function(a,b){ return a.date < b.date ? -1 : 1; });
-    var last30mood = avg(recentJournal(30).map(function(j){return j.mood;}));
+    var recent = recentJournal(14).slice().sort(function(a,b){ return a.date < b.date ? -1 : 1; })
+      .map(function(j){ return { date:j.date, mood:dayAvgTension(j) }; }).filter(function(e){ return e.mood!==null; });
+    var last30mood = avg(recentJournal(30).map(dayAvgTension).filter(function(v){ return v!==null; }));
     var lastInsight = state.insights.slice().sort(function(a,b){ return a.date < b.date ? 1 : -1; })[0];
     var openActions = state.actions.filter(function(a){ return a.status !== "done"; }).length;
     var goalScores = (state.goals||[]).filter(function(g){ return g.status !== "done"; }).map(goalLatestScore).filter(function(s){ return s!==null; });
@@ -566,11 +585,11 @@
       '<div class="grid-2">' +
         '<div class="card stat"><div class="num">'+pct+'%</div><div class="lbl">自己分析の進捗（'+intakeAnswered()+' / '+TOTAL_QUESTIONS+'問）</div></div>' +
         '<div class="card stat"><div class="num">'+st+'<span style="font-size:.9rem">日</span></div><div class="lbl">連続記録日数</div></div>' +
-        '<div class="card stat"><div class="num">'+(last30mood!==null ? last30mood.toFixed(1) : "—")+'</div><div class="lbl">直近30日の平均気分（10点満点）</div></div>' +
+        '<div class="card stat"><div class="num">'+(last30mood!==null ? last30mood.toFixed(1) : "—")+'</div><div class="lbl">直近30日の平均テンション（10点満点）</div></div>' +
         '<div class="card stat"><div class="num">'+openActions+'</div><div class="lbl">進行中のアクション</div></div>' +
         ((state.goals && state.goals.length) ? '<div class="card stat"><div class="num">'+(goalAvg!==null ? goalAvg.toFixed(1) : "—")+'</div><div class="lbl">目標への平均達成度（'+state.goals.length+'件中・10点満点）</div></div>' : "") +
       '</div>' +
-      '<div class="card"><h3>気分の推移（直近14日）</h3>' + sparkline(recent) + '</div>' +
+      '<div class="card"><h3>テンションの推移（直近14日）</h3>' + sparkline(recent) + '</div>' +
       (lastInsight ? '<div class="card"><h3>最近の気づき</h3><p class="quote-mark">"</p><p style="color:var(--ink)">'+esc(lastInsight.text)+'</p><p style="font-size:.75rem;color:var(--ink-faint);margin-top:.4em">'+fmtDate(lastInsight.date)+(lastInsight.tag?" ・ "+esc(lastInsight.tag):"")+'</p></div>' : "") +
       '<button class="btn btn-primary btn-block" data-nav="record">今日の記録をつける</button>';
   }
@@ -597,15 +616,31 @@
   function renderRecord(){
     var journalSorted = state.journal.slice().sort(function(a,b){ return a.date < b.date ? 1 : -1; });
     var insightsSorted = state.insights.slice().sort(function(a,b){ return a.date < b.date ? 1 : -1; });
+    var todayEntry = state.journal.filter(function(j){ return j.date === todayStr(); })[0];
+    var tt = todayEntry ? dayTensionObj(todayEntry) : { morning:null, noon:null, night:null };
+    var TENSION_SLOTS = [ {key:"morning", label:"朝", emoji:"🌅"}, {key:"noon", label:"昼", emoji:"☀️"}, {key:"night", label:"夜", emoji:"🌙"} ];
+    var slotBlocks = TENSION_SLOTS.map(function(s){
+      var val = tt[s.key];
+      var display = val!=null ? val : 6;
+      var badge = val!=null
+        ? '<span style="font-size:.75rem;color:var(--accent);font-weight:600;margin-left:.5em">記録済み: '+val+'</span>'
+        : '<span style="font-size:.75rem;color:var(--ink-faint);margin-left:.5em">未記録</span>';
+      return '<div style="margin-bottom:.9rem">' +
+        '<label class="field-label">'+s.emoji+' '+s.label+badge+'</label>' +
+        '<div class="row" style="align-items:center;gap:.6rem">' +
+          '<input type="range" min="1" max="10" value="'+display+'" data-tension-slot="'+s.key+'" style="flex:1">' +
+          '<span data-tension-val="'+s.key+'" style="min-width:1.6em;text-align:center;font-weight:600">'+display+'</span>' +
+          '<button class="btn btn-ghost btn-small" data-tension-save="'+s.key+'" type="button">記録する</button>' +
+        '</div></div>';
+    }).join("");
     return '<h2 class="section-title">記録</h2>' +
-      '<p class="section-lead">今日の気分と、頭に浮かんだ小さな気づきを残しておきましょう。</p>' +
+      '<p class="section-lead">1日の中でも気持ちは変わるもの。朝・昼・夜、気づいたタイミングでテンションを残しておきましょう。</p>' +
       '<div class="card" id="journal-form"><h3>今日の記録</h3><div class="col">' +
         '<div><label class="field-label">日付</label><input class="input" type="date" id="j-date" value="'+todayStr()+'"></div>' +
-        '<div><label class="field-label">気分（1〜10）: <span id="j-mood-val">6</span></label><input type="range" min="1" max="10" value="6" id="j-mood"></div>' +
-        '<div><label class="field-label">エネルギー（1〜10）: <span id="j-energy-val">6</span></label><input type="range" min="1" max="10" value="6" id="j-energy"></div>' +
-        '<div><label class="field-label">関係するタグ</label><div class="row" id="j-tags">'+chipRow("j",JOURNAL_TAGS,[])+'</div></div>' +
-        '<div><label class="field-label">感じたこと・頭に浮かんだこと</label><textarea id="j-note" placeholder="今日はどんな一日でしたか"></textarea></div>' +
-        '<button class="btn btn-primary" id="j-submit">記録を保存</button>' +
+        slotBlocks +
+        '<div><label class="field-label">関係するタグ</label><div class="row" id="j-tags">'+chipRow("j",JOURNAL_TAGS,(todayEntry&&todayEntry.tags)||[])+'</div></div>' +
+        '<div><label class="field-label">感じたこと・頭に浮かんだこと</label><textarea id="j-note" placeholder="今日はどんな一日でしたか">'+esc((todayEntry&&todayEntry.note)||"")+'</textarea></div>' +
+        '<button class="btn btn-primary" id="j-submit">タグ・メモを保存</button>' +
       '</div></div>' +
       '<div class="card" id="insight-form"><h3>小さな気づき</h3><p style="font-size:.82rem">会話の中でふと浮かんだ気づきを、その場で残せます。</p><div class="col">' +
         '<textarea id="i-text" placeholder="例：人と比べて焦る時は、大抵寝不足だと気づいた"></textarea>' +
@@ -614,7 +649,7 @@
       '</div></div>' +
       '<div class="card"><h3>これまでの記録</h3>' +
         (journalSorted.length ? journalSorted.slice(0,60).map(function(j){
-          return '<div class="entry"><div class="entry-head"><span class="entry-date">'+fmtDate(j.date)+'</span><span class="entry-scores">気分 '+j.mood+' ・ エネルギー '+j.energy+'</span></div>' +
+          return '<div class="entry"><div class="entry-head"><span class="entry-date">'+fmtDate(j.date)+'</span><span class="entry-scores">'+tensionSummaryText(j)+'</span></div>' +
             (j.tags && j.tags.length ? '<div class="entry-tags">'+j.tags.map(function(t){return '<span class="tag-pill">'+esc(t)+'</span>';}).join("")+'</div>' : "") +
             (j.note ? '<div class="entry-note">'+esc(j.note)+'</div>' : "") + '</div>';
         }).join("") : '<div class="empty">まだ記録がありません。</div>') + '</div>' +
@@ -851,7 +886,7 @@
     if(!any) lines.push("（まだ自己分析の回答がありません）");
     lines.push("【直近30日の記録】");
     var rj = recentJournal(30).slice().sort(function(a,b){ return a.date < b.date ? -1 : 1; });
-    if(rj.length){ rj.forEach(function(j){ lines.push(j.date+" 気分:"+j.mood+"/10 エネルギー:"+j.energy+"/10"+(j.tags&&j.tags.length?" タグ:"+j.tags.join(","):"")); if(j.note) lines.push("  メモ: "+j.note); }); }
+    if(rj.length){ rj.forEach(function(j){ var t=dayTensionObj(j); lines.push(j.date+" テンション(朝/昼/夜):"+(t.morning!=null?t.morning:"-")+"/"+(t.noon!=null?t.noon:"-")+"/"+(t.night!=null?t.night:"-")+(j.tags&&j.tags.length?" タグ:"+j.tags.join(","):"")); if(j.note) lines.push("  メモ: "+j.note); }); }
     else lines.push("（記録なし）");
     lines.push("");
     lines.push("【気づきログ（最近20件）】");
@@ -1015,12 +1050,31 @@
         persist(function(next){ next.intake[secId] = Object.assign({}, next.intake[secId]||{}, vals); });
       });
     });
-    var moodEl=app.querySelector("#j-mood"), moodVal=app.querySelector("#j-mood-val");
-    var energyEl=app.querySelector("#j-energy"), energyVal=app.querySelector("#j-energy-val");
-    if(moodEl) moodEl.addEventListener("input", function(){ moodVal.textContent = moodEl.value; });
-    if(energyEl) energyEl.addEventListener("input", function(){ energyVal.textContent = energyEl.value; });
+    app.querySelectorAll('[data-tension-slot]').forEach(function(slider){
+      slider.addEventListener("input", function(){
+        var key = slider.getAttribute("data-tension-slot");
+        var out = app.querySelector('[data-tension-val="'+key+'"]');
+        if(out) out.textContent = slider.value;
+      });
+    });
+    app.querySelectorAll('[data-tension-save]').forEach(function(btn){
+      btn.addEventListener("click", function(){
+        var key = btn.getAttribute("data-tension-save");
+        var slider = app.querySelector('[data-tension-slot="'+key+'"]');
+        if(!slider) return;
+        var val = parseInt(slider.value,10);
+        var date = (app.querySelector("#j-date")||{}).value || todayStr();
+        persist(function(next){
+          var entry = next.journal.filter(function(j){ return j.date === date; })[0];
+          if(!entry){ entry = { id:uid(), date:date, tension:{morning:null,noon:null,night:null}, note:"", tags:[] }; next.journal.push(entry); }
+          if(!entry.tension) entry.tension = { morning:null, noon:null, night:null };
+          entry.tension[key] = val;
+        });
+      });
+    });
     var jTags = [];
     app.querySelectorAll('[data-chip="j"]').forEach(function(chip){
+      if(chip.getAttribute("aria-pressed")==="true") jTags.push(chip.getAttribute("data-val"));
       chip.addEventListener("click", function(){
         var v = chip.getAttribute("data-val"); var i = jTags.indexOf(v);
         if(i>-1){ jTags.splice(i,1); chip.setAttribute("aria-pressed","false"); } else { jTags.push(v); chip.setAttribute("aria-pressed","true"); }
@@ -1029,10 +1083,12 @@
     var jSubmit = app.querySelector("#j-submit");
     if(jSubmit) jSubmit.addEventListener("click", function(){
       var date = app.querySelector("#j-date").value || todayStr();
-      var mood = parseInt(app.querySelector("#j-mood").value,10);
-      var energy = parseInt(app.querySelector("#j-energy").value,10);
       var note = app.querySelector("#j-note").value.trim();
-      persist(function(next){ next.journal = next.journal.filter(function(j){ return j.date !== date; }); next.journal.push({ id:uid(), date:date, mood:mood, energy:energy, note:note, tags:jTags.slice() }); });
+      persist(function(next){
+        var entry = next.journal.filter(function(j){ return j.date === date; })[0];
+        if(!entry){ entry = { id:uid(), date:date, tension:{morning:null,noon:null,night:null}, note:"", tags:[] }; next.journal.push(entry); }
+        entry.note = note; entry.tags = jTags.slice();
+      });
     });
     var iSubmit = app.querySelector("#i-submit");
     if(iSubmit) iSubmit.addEventListener("click", function(){
