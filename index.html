@@ -231,6 +231,7 @@
   var audioCtx = null;
   var alarmPlaying = false;
   var alarmBeepInterval = null;
+  var wakeLock = null;
 
   var CATEGORY_COLORS = [
     { id:"lime", hex:"#9FD356" },
@@ -414,6 +415,24 @@
     if(!t || !t.categoryId || !t.durationMin || !t.startedAt){ stopAlarm(); return; }
     if(remainingSec(t.startedAt, t.durationMin) <= 0) startAlarm(); else stopAlarm();
   }
+  function requestWakeLock(){
+    try{
+      if(!("wakeLock" in navigator)) return;
+      navigator.wakeLock.request("screen").then(function(wl){
+        wakeLock = wl;
+        wakeLock.addEventListener("release", function(){ wakeLock = null; });
+      }).catch(function(e){ console.error(e); });
+    }catch(e){ console.error(e); }
+  }
+  function releaseWakeLock(){
+    try{ if(wakeLock){ wakeLock.release(); wakeLock = null; } }catch(e){}
+  }
+  document.addEventListener("visibilitychange", function(){
+    if(document.visibilityState === "visible"){
+      var t = state.timer;
+      if(t && t.categoryId && t.durationMin && t.startedAt) requestWakeLock();
+    }
+  });
 
   function rangeStrs(period, which){
     var today = new Date(); today.setHours(0,0,0,0);
@@ -1228,6 +1247,7 @@
       if(!catSel || !catSel.value || dur<=0) return;
       sessionPickerHours = h; sessionPickerMinutes = m; sessionPickerCategoryId = catSel.value;
       ensureAudioCtx();
+      requestWakeLock();
       persist(function(next){ next.timer = { categoryId:catSel.value, startedAt:new Date().toISOString(), durationMin:dur }; });
     });
     app.querySelectorAll("[data-sched-start]").forEach(function(btn){
@@ -1247,6 +1267,7 @@
     var timerFinish = app.querySelector("#timer-finish");
     if(timerFinish) timerFinish.addEventListener("click", function(){
       stopAlarm();
+      releaseWakeLock();
       persist(function(next){
         var t = next.timer || {};
         if(t.startedAt && t.durationMin){
@@ -1261,6 +1282,7 @@
     var timerDiscard = app.querySelector("#timer-discard");
     if(timerDiscard) timerDiscard.addEventListener("click", function(){
       stopAlarm();
+      releaseWakeLock();
       persist(function(next){ next.timer = { categoryId:null, startedAt:null, durationMin:null }; });
     });
     var mSubmit = app.querySelector("#m-submit");
@@ -1300,6 +1322,7 @@
 
     if(timerTickInterval){ clearInterval(timerTickInterval); timerTickInterval = null; }
     if(state.timer && state.timer.categoryId && tab==="goals" && goalsSubTab==="today"){
+      if(!wakeLock) requestWakeLock();
       timerTickInterval = setInterval(function(){
         var el = document.getElementById("timer-countdown");
         if(!el){ clearInterval(timerTickInterval); timerTickInterval = null; return; }
