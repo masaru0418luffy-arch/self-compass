@@ -313,14 +313,17 @@
     chat:'<svg viewBox="0 0 24 24"><path d="M4 5.5h16v10H9.5L5.5 19v-3.5H4z"/></svg>'
   };
 
-  var DEFAULT_STATE = { meta:{ updatedAt:null }, intake:{}, journal:[], insights:[], actions:[], goals:[], chatHistory:[], categories:[], timeSessions:[], schedule:[], timer:{ categoryId:null, startedAt:null, durationMin:null } };
+  var DEFAULT_STATE = { meta:{ updatedAt:null }, profile:{ username:"" }, intake:{}, journal:[], insights:[], actions:[], goals:[], chatHistory:[], categories:[], timeSessions:[], schedule:[], timer:{ categoryId:null, startedAt:null, durationMin:null } };
   var state = JSON.parse(JSON.stringify(DEFAULT_STATE));
   var tab = sessionStorage.getItem("sc_tab") || "home";
   var authMode = "login";
   var authError = "";
   var currentUser = null;
+  var pendingUsername = "";
   var db = null, auth = null;
   var unsubSnapshot = null;
+
+  function displayName(){ return (state.profile && state.profile.username) ? state.profile.username : "マサル"; }
 
   function uid(){ if(window.crypto && crypto.randomUUID) return crypto.randomUUID(); return "id" + Date.now().toString(36) + Math.random().toString(36).slice(2,8); }
   function todayStr(){ var d = new Date(); return d.getFullYear() + "-" + String(d.getMonth()+1).padStart(2,"0") + "-" + String(d.getDate()).padStart(2,"0"); }
@@ -535,10 +538,11 @@
       if(snap.exists){
         var data = snap.data();
         state = Object.assign({}, DEFAULT_STATE, data, {
-          intake: data.intake || {}, journal: data.journal || [], insights: data.insights || [], actions: data.actions || [], goals: data.goals || [], chatHistory: data.chatHistory || [],
+          profile: data.profile || { username:"" }, intake: data.intake || {}, journal: data.journal || [], insights: data.insights || [], actions: data.actions || [], goals: data.goals || [], chatHistory: data.chatHistory || [],
           categories: data.categories || [], timeSessions: data.timeSessions || [], schedule: data.schedule || [], timer: data.timer || { categoryId:null, startedAt:null, durationMin:null }
         });
       } else {
+        if(pendingUsername){ state.profile = { username: pendingUsername }; pendingUsername = ""; }
         docRef().set(state);
       }
       render();
@@ -577,7 +581,7 @@
     var goalAvg = avg(goalScores);
     var welcome = "";
     if(intakeAnswered()===0 && state.journal.length===0){
-      welcome = '<div class="card"><h3>はじめまして。</h3>' +
+      welcome = '<div class="card"><h3>'+(state.profile&&state.profile.username?"はじめまして、"+esc(state.profile.username)+"さん。":"はじめまして。")+'</h3>' +
         '<p>ここは、あなただけの内省と相談の記録場所です。まずは「自己分析」タブから、幼少期のことなど、あなた自身について少しずつ教えてください。答える順番や、一度にどこまで書くかはあなたのペースで大丈夫です。</p>' +
         '<button class="btn btn-primary btn-block" data-nav="intake">自己分析をはじめる</button></div>';
     }
@@ -869,8 +873,8 @@
 
   function buildSummary(){
     var lines = [];
-    lines.push("あなたは資格を持つ一流のキャリア・メンタルカウンセラーです。以下はマサルさんについて、これまでに蓄積されたプロフィールと最近の記録です。");
-    lines.push("この情報をもとに、(1)今のマサルさんの状況と傾向の分析 (2)気をつけたほうがよいパターン (3)次の一歩の具体的な提案 を、共感的かつ実践的に伝えてください。");
+    lines.push("あなたは資格を持つ一流のキャリア・メンタルカウンセラーです。以下は"+displayName()+"さんについて、これまでに蓄積されたプロフィールと最近の記録です。");
+    lines.push("この情報をもとに、(1)今の"+displayName()+"さんの状況と傾向の分析 (2)気をつけたほうがよいパターン (3)次の一歩の具体的な提案 を、共感的かつ実践的に伝えてください。");
     lines.push("");
     lines.push("【自己分析プロフィール】");
     var any = false;
@@ -922,8 +926,8 @@
   }
 
   function buildCounselorSystem(){
-    return "あなたは資格を持つ一流のキャリア・メンタルカウンセラーです。話し相手は「マサル」さんです。" +
-      "以下は、マサルさんがこれまでに記録してきた自己分析プロフィールと最近の記録です。これを踏まえて、共感的かつ実践的に、マサルさん専用の視点で会話してください。" +
+    return "あなたは資格を持つ一流のキャリア・メンタルカウンセラーです。話し相手は「"+displayName()+"」さんです。" +
+      "以下は、"+displayName()+"さんがこれまでに記録してきた自己分析プロフィールと最近の記録です。これを踏まえて、共感的かつ実践的に、"+displayName()+"さん専用の視点で会話してください。" +
       "一方的に助言するのではなく、対話の中で時には質問を返しながら、一緒に考える姿勢で応じてください。深刻な症状や医療的な判断が必要な内容には、専門家への相談も選択肢として添えてください。\n\n" +
       buildSummary();
   }
@@ -967,7 +971,7 @@
     }
     var msgs = state.chatHistory || [];
     return '<h2 class="section-title">AIカウンセラー</h2>' +
-      '<p class="section-lead">自己分析・記録・目標など、これまでの情報を踏まえてマサルさん専用の視点で会話します。</p>' +
+      '<p class="section-lead">自己分析・記録・目標など、これまでの情報を踏まえて'+displayName()+'さん専用の視点で会話します。</p>' +
       '<div class="card chat-log" id="chat-log">' +
         (msgs.length ? msgs.map(function(m){
           return '<div class="chat-msg chat-'+m.role+'"><div class="chat-bubble">'+esc(m.content)+'</div></div>';
@@ -1004,6 +1008,7 @@
         '</div>' +
         (authError ? '<div class="banner" style="margin-bottom:1rem">'+esc(authError)+'</div>' : "") +
         '<div class="col">' +
+          (authMode==="signup" ? '<div><label class="field-label">ユーザーネーム</label><input class="input" type="text" id="auth-username" autocomplete="nickname" placeholder="AIカウンセラーがあなたを呼ぶ名前"></div>' : "") +
           '<div><label class="field-label">メールアドレス</label><input class="input" type="email" id="auth-email" autocomplete="email"></div>' +
           '<div><label class="field-label">パスワード（6文字以上）</label><input class="input" type="password" id="auth-pw" autocomplete="'+(authMode==="signup"?"new-password":"current-password")+'"></div>' +
           '<button class="btn btn-primary btn-block" id="auth-submit">'+(authMode==="login"?"ログイン":"アカウントを作成")+'</button>' +
@@ -1017,8 +1022,17 @@
       var email = app.querySelector("#auth-email").value.trim();
       var pw = app.querySelector("#auth-pw").value;
       authError = "";
-      var fn = authMode === "login" ? auth.signInWithEmailAndPassword(email, pw) : auth.createUserWithEmailAndPassword(email, pw);
-      fn.catch(function(err){ authError = err.message; renderAuth(); });
+      if(authMode === "signup"){
+        var usernameEl = app.querySelector("#auth-username");
+        var username = usernameEl ? usernameEl.value.trim() : "";
+        if(!username){ authError = "ユーザーネームを入力してください。"; renderAuth(); return; }
+        pendingUsername = username;
+        auth.createUserWithEmailAndPassword(email, pw).then(function(cred){
+          return cred.user.updateProfile({ displayName: username });
+        }).catch(function(err){ pendingUsername = ""; authError = err.message; renderAuth(); });
+      } else {
+        auth.signInWithEmailAndPassword(email, pw).catch(function(err){ authError = err.message; renderAuth(); });
+      }
     });
   }
 
